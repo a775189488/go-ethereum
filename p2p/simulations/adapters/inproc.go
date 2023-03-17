@@ -269,6 +269,7 @@ func (sn *SimNode) Start(snapshots map[string][]byte) error {
 		return regErr
 	}
 
+	// 打开node的各种serivce. http rpc weksocket ipc 等
 	if err := sn.node.Start(); err != nil {
 		return err
 	}

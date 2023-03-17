@@ -133,6 +133,7 @@ func (f *filterIter) Next() bool {
 // will be returned.
 //
 // It's safe to call AddSource and Close concurrently with Next.
+// 其实就是个惰性查询器，可以支持多个数据源。这里的数据源只用于返回node信息
 type FairMix struct {
 	wg      sync.WaitGroup
 	fromAny chan *Node

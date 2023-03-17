@@ -120,6 +120,7 @@ type Peer struct {
 }
 
 // NewPeer returns a peer for testing purposes.
+// emm 用来测试的。忽略
 func NewPeer(id enode.ID, name string, caps []Cap) *Peer {
 	// Generate a fake set of local protocols to match as running caps. Almost
 	// no fields needs to be meaningful here as we're only using it to cross-
@@ -129,6 +130,7 @@ func NewPeer(id enode.ID, name string, caps []Cap) *Peer {
 		protos[i].Name = cap.Name
 		protos[i].Version = cap.Version
 	}
+	// 就是一个管道。可读可写。和chan有啥区别？
 	pipe, _ := net.Pipe()
 	node := enode.SignNull(new(enr.Record), id)
 	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}

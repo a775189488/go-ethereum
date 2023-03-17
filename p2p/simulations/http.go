@@ -279,6 +279,7 @@ func NewServer(network *Network) *Server {
 
 	s.OPTIONS("/", s.Options)
 	s.GET("/", s.GetNetwork)
+	// 其实和startNode差不多，这个相当于是将网络中的node一次性全部打开
 	s.POST("/start", s.StartNetwork)
 	s.POST("/stop", s.StopNetwork)
 	s.POST("/mocker/start", s.StartMocker)

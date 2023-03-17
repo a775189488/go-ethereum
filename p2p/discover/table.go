@@ -65,14 +65,20 @@ const (
 // itself up-to-date by verifying the liveness of neighbors and requesting their node
 // records when announcements of a new record version are received.
 type Table struct {
-	mutex   sync.Mutex        // protects buckets, bucket content, nursery, rand
+	mutex sync.Mutex // protects buckets, bucket content, nursery, rand
+	// p2p节点信息。按照节点距离(距离节点也是经过掩码运算的，比如说小于238的都放在0号)为链表
 	buckets [nBuckets]*bucket // index of known nodes by distance
-	nursery []*node           // bootstrap nodes
-	rand    *mrand.Rand       // source of randomness, periodically reseeded
-	ips     netutil.DistinctNetSet
+	// 这些好像是在cmd启动中指定的node
+	nursery []*node // bootstrap nodes
+	// 大数随机种子
+	rand *mrand.Rand // source of randomness, periodically reseeded
+	// ip集合
+	ips netutil.DistinctNetSet
 
-	log        log.Logger
-	db         *enode.DB // database of known nodes
+	log log.Logger
+	db  *enode.DB // database of known nodes
+
+	// 具体的服务发现协议。用于发送请求，接受请求等
 	net        transport
 	refreshReq chan chan struct{}
 	initDone   chan struct{}
@@ -94,7 +100,8 @@ type transport interface {
 // bucket contains nodes, ordered by their last activity. the entry
 // that was most recently active is the first element in entries.
 type bucket struct {
-	entries      []*node // live entries, sorted by time of last contact
+	entries []*node // live entries, sorted by time of last contact
+	// 代替节点？当发现的node数量大于entries的容量时就会放到这里（我理解应该不会参与运算
 	replacements []*node // recently seen nodes to be used if revalidation fails
 	ips          netutil.DistinctNetSet
 }
@@ -258,6 +265,7 @@ loop:
 			revalidate.Reset(tab.nextRevalidateTime())
 			revalidateDone = nil
 		case <-copyNodes.C:
+			// 这个任务其实是定时将 bucket 中的节点写入leveldb中
 			go tab.copyLiveNodes()
 		case <-tab.closeReq:
 			break loop
@@ -385,9 +393,12 @@ func (tab *Table) copyLiveNodes() {
 	now := time.Now()
 	for _, b := range &tab.buckets {
 		for _, n := range b.entries {
+			tab.log.Debug("check node in copyLiveNodes xxxxxxx>")
 			if n.livenessChecks > 0 && now.Sub(n.addedAt) >= seedMinTableTime {
+				tab.log.Debug("save node in copyLiveNodes xxxxxxx>")
 				tab.db.UpdateNode(unwrapNode(n))
 			}
+			tab.log.Debug("check fail! node in copyLiveNodes xxxxxxx>")
 		}
 	}
 }
@@ -399,6 +410,7 @@ func (tab *Table) copyLiveNodes() {
 // preferLive is true and the table contains any verified nodes, the result will not
 // contain unverified nodes. However, if there are no verified nodes at all, the result
 // will contain unverified nodes.
+// 这个函数相当于是给定一个nodeID 从本地的缓存中取离这个node最近的n个ID返回
 func (tab *Table) findnodeByID(target enode.ID, nresults int, preferLive bool) *nodesByDistance {
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
@@ -510,6 +522,7 @@ func (tab *Table) addVerifiedNode(n *node) {
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
 	b := tab.bucket(n.ID())
+	// 这个就相当于根据ID更新一下信息
 	if tab.bumpInBucket(b, n) {
 		// Already in bucket, moved to front.
 		return
@@ -669,9 +682,11 @@ type nodesByDistance struct {
 
 // push adds the given node to the list, keeping the total size below maxElems.
 func (h *nodesByDistance) push(n *node, maxElems int) {
+	// 这里就是找到插入的位置 找到 n 距离当前节点最近的位置（相比于其他节点）相等的是不会插入进去的
 	ix := sort.Search(len(h.entries), func(i int) bool {
 		return enode.DistCmp(h.target, h.entries[i].ID(), n.ID()) > 0
 	})
+	// 这里append进去其实是占了个位置。后续还需要挪
 	if len(h.entries) < maxElems {
 		h.entries = append(h.entries, n)
 	}

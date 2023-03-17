@@ -34,6 +34,7 @@ var errMissingPrefix = errors.New("missing 'enr:' prefix for base64-encoded reco
 
 // Node represents a host on the network.
 type Node struct {
+	// 存储了节点信息，包括ip地址，协议，公钥等
 	r  enr.Record
 	id ID
 }
@@ -45,6 +46,8 @@ func New(validSchemes enr.IdentityScheme, r *enr.Record) (*Node, error) {
 		return nil, err
 	}
 	node := &Node{r: *r}
+	// id = validSchemes.NodeAddr(&node.r) localnode的初始方式是使用IDV4
+	// 所以这里的 id 其实是 public key 加密后的值
 	if n := copy(node.id[:], validSchemes.NodeAddr(&node.r)); n != len(ID{}) {
 		return nil, fmt.Errorf("invalid node ID length %d, need %d", n, len(ID{}))
 	}
@@ -250,6 +253,8 @@ func ParseID(in string) (ID, error) {
 // DistCmp compares the distances a->target and b->target.
 // Returns -1 if a is closer to target, 1 if b is closer to target
 // and 0 if they are equal.
+// ^ 操作是同真异假。所以我理解这个表达式其实也是直接比较 byte 数组的差异，并没有特别复杂的算法
+// 根据 Kademlia 协议介绍。节点之间的距离越近，意味着节点ID的公共前缀越长
 func DistCmp(target, a, b ID) int {
 	for i := range target {
 		da := a[i] ^ target[i]
@@ -264,16 +269,24 @@ func DistCmp(target, a, b ID) int {
 }
 
 // LogDist returns the logarithmic distance between a and b, log2(a ^ b).
+// 返回两个节点的距离。 todo 没明白这里为什么注释说i使用 log2(a^b) 来计算距离。好像没什么关系
 func LogDist(a, b ID) int {
 	lz := 0
+	// 这里其实就是求 a[i] ^ b[i] 的结果有多少个前导0并累加到 lz 变量中(换句话说就是求a和b的相同的位数～)
+	//  由于 byte 是8位，那么如果 x = 0 。则就是有8个前导0
 	for i := range a {
 		x := a[i] ^ b[i]
+		// 同真异假
 		if x == 0 {
 			lz += 8
 		} else {
+			// LeadingZeros8 这个函数其实就是求 uint8的前导0个数。如果 x != 0 说明这个byte已经不同了，就不需要再算下去了
 			lz += bits.LeadingZeros8(x)
 			break
 		}
 	}
+	// len(a) * 8 实际为 aID 的总位数
+	// lz 实际位aID和bID的前置相同的位数
+	// 那么这里返回的其实就是aID和bID除了前置相同的位数之后的位数
 	return len(a)*8 - lz
 }

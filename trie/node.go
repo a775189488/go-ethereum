@@ -34,16 +34,21 @@ type node interface {
 }
 
 type (
+	// root几点下的17node没有共同的key时。rootnode为fullNode 否则为shortNode
 	fullNode struct {
+		// 为什么是17？以为做了半哈希处理，单个byte不会超过16
 		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)
 		flags    nodeFlag
 	}
+	// 我理解 shortNode 是树节点的组成部分。fullNode / hashNode / valueNode 才是真正的value。所以没有shartNode是叶子节点的说法
 	shortNode struct {
 		Key   []byte
 		Val   node
 		flags nodeFlag
 	}
-	hashNode  []byte
+	// 加密数据
+	hashNode []byte
+	// 未加密数据
 	valueNode []byte
 )
 

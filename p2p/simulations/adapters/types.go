@@ -233,6 +233,7 @@ func RandomNodeConfig() *NodeConfig {
 }
 
 func assignTCPPort() (uint16, error) {
+	// todo 我理解0应该是随机监听，需要测试一下
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, err

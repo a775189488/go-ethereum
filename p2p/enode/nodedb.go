@@ -132,6 +132,7 @@ func newPersistentDB(path string) (*DB, error) {
 }
 
 // nodeKey returns the database key for a node record.
+// n:xxxxxxx:v4
 func nodeKey(id ID) []byte {
 	key := append([]byte(dbNodePrefix), id[:]...)
 	key = append(key, ':')
@@ -252,6 +253,7 @@ func mustDecodeNode(id, data []byte) *Node {
 }
 
 // UpdateNode inserts - potentially overwriting - a node into the peer database.
+// 实际上就是写入 node 信息的方法
 func (db *DB) UpdateNode(node *Node) error {
 	if node.Seq() < db.NodeSeq(node.ID()) {
 		return nil
@@ -308,6 +310,7 @@ func (db *DB) ensureExpirer() {
 
 // expirer should be started in a go routine, and is responsible for looping ad
 // infinitum and dropping stale data from the database.
+// 定时清除过期节点
 func (db *DB) expirer() {
 	tick := time.NewTicker(dbCleanupCycle)
 	defer tick.Stop()
@@ -444,6 +447,8 @@ func (db *DB) storeLocalSeq(id ID, n uint64) {
 
 // QuerySeeds retrieves random nodes to be used as potential seed nodes
 // for bootstrapping.
+// n: 随机取n个节点
+// maxAge: 过滤那些比较旧的节点（ping-pong的时间比较久了
 func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 	var (
 		now   = time.Now()

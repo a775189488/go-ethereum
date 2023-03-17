@@ -60,10 +60,11 @@ func makeProvers(trie *Trie) []func(key []byte) *memorydb.Database {
 }
 
 func TestProof(t *testing.T) {
-	trie, vals := randomTrie(500)
+	trie, vals := randomTrie(11)
 	root := trie.Hash()
 	for i, prover := range makeProvers(trie) {
 		for _, kv := range vals {
+			// 创建一个kvdb. k: node哈希值  v: node序列化值。verifyproof就是需要验证该db是否是准确的
 			proof := prover(kv.k)
 			if proof == nil {
 				t.Fatalf("prover %d: missing key %x while constructing proof", i, kv.k)

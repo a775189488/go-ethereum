@@ -39,6 +39,7 @@ func (t *Trie) Prove(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter) e
 	var nodes []node
 	tn := t.root
 	for len(key) > 0 && tn != nil {
+		// 这里为什么不处理 valueNode？因为如是valueNode就证明已经找到对应key value了，无需继续进行
 		switch n := tn.(type) {
 		case *shortNode:
 			if len(key) < len(n.Key) || !bytes.Equal(n.Key, key[:len(n.Key)]) {

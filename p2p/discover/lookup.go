@@ -27,12 +27,18 @@ import (
 // target by querying nodes that are closer to it on each iteration. The given target does
 // not need to be an actual node identifier.
 type lookup struct {
-	tab         *Table
-	queryfunc   func(*node) ([]*node, error)
-	replyCh     chan []*node
-	cancelCh    <-chan struct{}
+	tab *Table
+	// 查询节点的函数
+	queryfunc func(*node) ([]*node, error)
+	// 用于临时存放从db中加载的和实际查询到的结果。后续还需要将其push到result中，我理解其实是解藕异步处理
+	replyCh  chan []*node
+	cancelCh <-chan struct{}
+	// seen 被发现的节点。就不会被重复push
+	// asked 已经询问的节点。就不会被发送请求进行询问
 	asked, seen map[enode.ID]bool
-	result      nodesByDistance
+	// 存放距离目标node由近到远的节点
+	result nodesByDistance
+	// 用于惰性查询时使用
 	replyBuffer []*node
 	queries     int
 }
@@ -58,6 +64,7 @@ func newLookup(ctx context.Context, tab *Table, target enode.ID, q queryFunc) *l
 
 // run runs the lookup to completion and returns the closest nodes found.
 func (it *lookup) run() []*enode.Node {
+	// 返回 true 表示有发现了新的 node, false代表已经没有新的 node的了, 这一轮的lookup到此位置, 返回发现的node信息
 	for it.advance() {
 	}
 	return unwrapNodes(it.result.entries)
@@ -66,6 +73,7 @@ func (it *lookup) run() []*enode.Node {
 // advance advances the lookup until any new nodes have been found.
 // It returns false when the lookup has ended.
 func (it *lookup) advance() bool {
+	// 如果 queries == 0 就直接返回了。因为在这一轮没有发现新的节点
 	for it.startQueries() {
 		select {
 		case nodes := <-it.replyCh:
@@ -78,6 +86,7 @@ func (it *lookup) advance() bool {
 				}
 			}
 			it.queries--
+			// 如果 replyBuffer > 0 说明有新的node。直接返回true。感觉这里设计的很绕
 			if len(it.replyBuffer) > 0 {
 				return true
 			}
@@ -103,6 +112,7 @@ func (it *lookup) startQueries() bool {
 	}
 
 	// The first query returns nodes from the local table.
+	// it.queries 一开始是-1，代表还没有开始。此时就会从 table 中获取节点信息（table中的节点信息来自leveldb或者节点启动配置）
 	if it.queries == -1 {
 		closest := it.tab.findnodeByID(it.result.target, bucketSize, false)
 		// Avoid finishing the lookup too quickly if table is empty. It'd be better to wait
@@ -112,10 +122,12 @@ func (it *lookup) startQueries() bool {
 			it.slowdown()
 		}
 		it.queries = 1
+		// 就算 entries == 0也会返回
 		it.replyCh <- closest.entries
 		return true
 	}
 
+	// 根据上面的 advance 可知。如果table中没有节点。那么第二轮来到这里的时候 it.queries = 0
 	// Ask the closest nodes that we haven't asked yet.
 	for i := 0; i < len(it.result.entries) && it.queries < alpha; i++ {
 		n := it.result.entries[i]
@@ -139,20 +151,25 @@ func (it *lookup) slowdown() {
 }
 
 func (it *lookup) query(n *node, reply chan<- []*node) {
+	// 这里首先查一下leveldb记录的这个节点的查找失败记录（获取不到节点也算
 	fails := it.tab.db.FindFails(n.ID(), n.IP())
+	// 这里的 queryfunc 就是发一个 findnode 请求到目标节点查找他附近的节点
 	r, err := it.queryfunc(n)
 	if err == errClosed {
 		// Avoid recording failures on shutdown.
 		reply <- nil
 		return
 	} else if len(r) == 0 {
+		// 如果获取不到节点，更新 fails 记录
 		fails++
 		it.tab.db.UpdateFindFails(n.ID(), n.IP(), fails)
 		// Remove the node from the local table if it fails to return anything useful too
 		// many times, but only if there are enough other nodes in the bucket.
+		// 如果多次找不到对应的即节点。而且当前 bucket 的数量超过一半了，就直接把它踢了
 		dropped := false
 		if fails >= maxFindnodeFailures && it.tab.bucketLen(n.ID()) >= bucketSize/2 {
 			dropped = true
+			// 这里只是将它踢出缓存，并不会从 leveldb中删除
 			it.tab.delete(n)
 		}
 		it.tab.log.Trace("FINDNODE failed", "id", n.ID(), "failcount", fails, "dropped", dropped, "err", err)
@@ -163,6 +180,7 @@ func (it *lookup) query(n *node, reply chan<- []*node) {
 
 	// Grab as many nodes as possible. Some of them might not be alive anymore, but we'll
 	// just remove those again during revalidation.
+	// 如果有的话就直接加到 table 的bucket中。当然最终会写入到 leveldb
 	for _, n := range r {
 		it.tab.addSeenNode(n)
 	}

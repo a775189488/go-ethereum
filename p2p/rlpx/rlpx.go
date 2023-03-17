@@ -513,6 +513,7 @@ func (h *handshakeState) staticSharedSecret(prv *ecdsa.PrivateKey) ([]byte, erro
 // prv is the local client's private key.
 func (h *handshakeState) runInitiator(conn io.ReadWriter, prv *ecdsa.PrivateKey, remote *ecdsa.PublicKey) (s Secrets, err error) {
 	h.initiator = true
+	// 在服务发现阶段其实已经获取了对应的公钥
 	h.remote = ecies.ImportECDSAPublic(remote)
 
 	authMsg, err := h.makeAuthMsg(prv)

@@ -319,6 +319,12 @@ func (t *UDPv5) lookupWorker(destNode *node, target enode.ID) ([]*node, error) {
 // lookupDistances computes the distance parameter for FINDNODE calls to dest.
 // It chooses distances adjacent to logdist(target, dest), e.g. for a target
 // with logdist(target, dest) = 255 the result is [255, 256, 254].
+// 1. 取 target -> dest 的距离
+// 2. 根据 lookupRequestLimit 的值（目前是16），再计算最终的距离范围
+// 3. 例如目前计算出来 target -> dest的距离是 17。
+//    向前取16个就是 2~16
+//    向后取16个就是 18~32
+//    最后范围的 dists 是 [2~16, 17, 18~32]
 func lookupDistances(target, dest enode.ID) (dists []uint) {
 	td := enode.LogDist(target, dest)
 	dists = append(dists, uint(td))
@@ -339,6 +345,7 @@ func (t *UDPv5) ping(n *enode.Node) (uint64, error) {
 	resp := t.call(n, v5wire.PongMsg, req)
 	defer t.callDone(resp)
 
+	// 会阻塞
 	select {
 	case pong := <-resp.ch:
 		return pong.(*v5wire.Pong).ENRSeq, nil
@@ -494,17 +501,20 @@ func (t *UDPv5) dispatch() {
 	for {
 		select {
 		case c := <-t.callCh:
+			// 处理需要发送的请求
 			id := c.node.ID()
 			t.callQueue[id] = append(t.callQueue[id], c)
 			t.sendNextCall(id)
 
 		case ct := <-t.respTimeoutCh:
+			// 处理超时的请求
 			active := t.activeCallByNode[ct.c.node.ID()]
 			if ct.c == active && ct.timer == active.timeout {
 				ct.c.err <- errTimeout
 			}
 
 		case c := <-t.callDoneCh:
+			// 表示已经处理完一个请求的response了
 			id := c.node.ID()
 			active := t.activeCallByNode[id]
 			if active != c {
@@ -516,6 +526,7 @@ func (t *UDPv5) dispatch() {
 			t.sendNextCall(id)
 
 		case p := <-t.packetInCh:
+			// 接收到的udp的包就在这里处理
 			t.handlePacket(p.Data, p.Addr)
 			// Arm next read.
 			t.readNextCh <- struct{}{}
@@ -561,6 +572,7 @@ func (t *UDPv5) startResponseTimeout(c *callV5) {
 // sendNextCall sends the next call in the call queue if there is no active call.
 func (t *UDPv5) sendNextCall(id enode.ID) {
 	queue := t.callQueue[id]
+	// 如果该节点目前有一个请求正在发送，那么其他的请求将会放到queue中（response之后就算发送完成）也就是说这个是按照node串行
 	if len(queue) == 0 || t.activeCallByNode[id] != nil {
 		return
 	}
@@ -720,7 +732,9 @@ func (t *UDPv5) handle(p v5wire.Packet, fromID enode.ID, fromAddr *net.UDPAddr) 
 // handleUnknown initiates a handshake by responding with WHOAREYOU.
 func (t *UDPv5) handleUnknown(p *v5wire.Unknown, fromID enode.ID, fromAddr *net.UDPAddr) {
 	challenge := &v5wire.Whoareyou{Nonce: p.Nonce}
+	// 随机 IDNonce
 	crand.Read(challenge.IDNonce[:])
+	// 如果是新节点，这个逻辑走不到
 	if n := t.getNode(fromID); n != nil {
 		challenge.Node = n
 		challenge.RecordSeq = n.Seq()
@@ -781,6 +795,7 @@ func (t *UDPv5) handlePing(p *v5wire.Ping, fromID enode.ID, fromAddr *net.UDPAdd
 // handleFindnode returns nodes to the requester.
 func (t *UDPv5) handleFindnode(p *v5wire.Findnode, fromID enode.ID, fromAddr *net.UDPAddr) {
 	nodes := t.collectTableNodes(fromAddr.IP, p.Distances, findnodeResultLimit)
+	// 避免结果过大。分批发送，3个一批
 	for _, resp := range packNodes(p.ReqID, nodes) {
 		t.sendResponse(fromID, fromAddr, resp)
 	}

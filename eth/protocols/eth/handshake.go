@@ -91,12 +91,15 @@ func (p *Peer) readStatus(network uint64, status *StatusPacket, genesis common.H
 	if err := msg.Decode(&status); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
+	// 检查网络id
 	if status.NetworkID != network {
 		return fmt.Errorf("%w: %d (!= %d)", errNetworkIDMismatch, status.NetworkID, network)
 	}
+	// 检查协议版本，如果不一样也会返错
 	if uint(status.ProtocolVersion) != p.version {
 		return fmt.Errorf("%w: %d (!= %d)", errProtocolVersionMismatch, status.ProtocolVersion, p.version)
 	}
+	// 对比创世区块的hash如果不一致则返回错
 	if status.Genesis != genesis {
 		return fmt.Errorf("%w: %x (!= %x)", errGenesisMismatch, status.Genesis, genesis)
 	}

@@ -43,10 +43,12 @@ const (
 
 // Server is an RPC server.
 type Server struct {
+	// 注册的方法存在这里
 	services serviceRegistry
 	idgen    func() ID
 	run      int32
-	codecs   mapset.Set
+	// 这里存的是不同协议的server
+	codecs mapset.Set
 }
 
 // NewServer creates a new server instance with no registered handlers.

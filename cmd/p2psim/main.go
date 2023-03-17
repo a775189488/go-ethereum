@@ -410,9 +410,15 @@ func rpcNode(ctx *cli.Context) error {
 		return rpcSubscribe(rpcClient, ctx.App.Writer, method, args[3:]...)
 	}
 	var result interface{}
-	params := make([]interface{}, len(args[3:]))
-	for i, v := range args[3:] {
-		params[i] = v
+	//params := make([]interface{}, len(args[3:]))
+	//for i, v := range args[3:] {
+	//	params[i] = v
+	//}
+	params := make([]interface{}, 0)
+	if len(args) > 4 {
+		for _, v := range args[3:] {
+			params = append(params, v)
+		}
 	}
 	if err := rpcClient.Call(&result, method, params...); err != nil {
 		return err

@@ -166,6 +166,7 @@ func newTable(path string, name string, readMeter metrics.Meter, writeMeter metr
 			return nil, err
 		}
 	} else {
+		// 没有就创建，然后把文件指针指向末尾
 		index, err = openFreezerFileForAppend(filepath.Join(path, idxName))
 		if err != nil {
 			return nil, err

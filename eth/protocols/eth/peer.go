@@ -65,6 +65,7 @@ func max(a, b int) int {
 }
 
 // Peer is a collection of relevant information we have about a `eth` peer.
+// 继承 p2p.Peer
 type Peer struct {
 	id string // Unique ID for the peer, cached
 

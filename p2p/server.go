@@ -165,24 +165,34 @@ type Server struct {
 
 	// Hooks for testing. These are useful because we can inhibit
 	// the whole protocol stack.
+	// 创建transport的方式，目前这个版本应该都是rlpx
 	newTransport func(net.Conn, *ecdsa.PublicKey) transport
-	newPeerHook  func(*Peer)
-	listenFunc   func(network, addr string) (net.Listener, error)
+	// 添加peer节点的回调。是做完握手之后的
+	newPeerHook func(*Peer)
+	// 监听的方法统一使用的net.Listen
+	listenFunc func(network, addr string) (net.Listener, error)
 
 	lock    sync.Mutex // protects running
 	running bool
 
+	// 用上面的 listenFunc 生成的 listener
 	listener     net.Listener
 	ourHandshake *protoHandshake
 	loopWG       sync.WaitGroup // loop, listenLoop
 	peerFeed     event.Feed
 	log          log.Logger
 
-	nodedb    *enode.DB
+	// 存储node的db 现在是leveldb
+	nodedb *enode.DB
+	// 本地节点信息
 	localnode *enode.LocalNode
-	ntab      *discover.UDPv4
-	DiscV5    *discover.UDPv5
-	discmix   *enode.FairMix
+	// v4的服务发现
+	ntab *discover.UDPv4
+	// v5的服务发现
+	DiscV5  *discover.UDPv5
+	discmix *enode.FairMix
+	// 1. 存储peer
+	// 2. 建立信道
 	dialsched *dialScheduler
 
 	// Channels into the run loop.
@@ -230,7 +240,9 @@ type conn struct {
 
 type transport interface {
 	// The two handshakes.
+	// 通过这个方法来完成交换密钥，创建加密信道的流程
 	doEncHandshake(prv *ecdsa.PrivateKey) (*ecdsa.PublicKey, error)
+	// 这个方法来进行协议特性之间的协商，比如双方的协议版本，是否支持Snappy加密方式等操作
 	doProtoHandshake(our *protoHandshake) (*protoHandshake, error)
 	// The MsgReadWriter can only be used after the encryption
 	// handshake has completed. The code uses conn.id to track this
@@ -478,9 +490,11 @@ func (srv *Server) Start() (err error) {
 			return err
 		}
 	}
+	// 开启服务发现
 	if err := srv.setupDiscovery(); err != nil {
 		return err
 	}
+	// 开启dial任务
 	srv.setupDialScheduler()
 
 	srv.loopWG.Add(1)
@@ -576,6 +590,7 @@ func (srv *Server) setupDiscovery() error {
 	if !srv.NoDiscovery {
 		if srv.DiscoveryV5 {
 			unhandled = make(chan discover.ReadPacket, 100)
+			// 这里需要共用udp端口，我的理解是为了兼容？
 			sconn = &sharedUDPConn{conn, unhandled}
 		}
 		cfg := discover.Config{
@@ -590,6 +605,7 @@ func (srv *Server) setupDiscovery() error {
 			return err
 		}
 		srv.ntab = ntab
+		// 这个很重要 dialtask 会使用这个dismix去查对应的被发现的节点信息
 		srv.discmix.AddSource(ntab.RandomNodes())
 	}
 
@@ -610,6 +626,9 @@ func (srv *Server) setupDiscovery() error {
 		if err != nil {
 			return err
 		}
+		// 为什么不使用 srv.discmix.AddSource(ntab.RandomNodes()) ?
+		// https://github.com/ethereum/go-ethereum/pull/25380 在这个issue中有人打算修复这个，但是被否定了。原因是会影响 light 节点？
+		// 后面研究light节点需要关注一下
 	}
 	return nil
 }
@@ -876,6 +895,9 @@ func (srv *Server) listenLoop() {
 		}
 
 		remoteIP := netutil.AddrIP(fd.RemoteAddr())
+		// 检查ip的合法性
+		//  1. 检查是不是黑名单的IP
+		//  2. 检查IP是否在频繁连接（防止ddos）
 		if err := srv.checkInboundConn(remoteIP); err != nil {
 			srv.log.Debug("Rejected inbound connection", "addr", fd.RemoteAddr(), "err", err)
 			fd.Close()
@@ -891,6 +913,7 @@ func (srv *Server) listenLoop() {
 			srv.log.Trace("Accepted connection", "addr", fd.RemoteAddr())
 		}
 		go func() {
+			// 进行handshake后将connection保存起来
 			srv.SetupConn(fd, inboundConn, nil)
 			slots <- struct{}{}
 		}()
@@ -920,6 +943,8 @@ func (srv *Server) checkInboundConn(remoteIP net.IP) error {
 // or the handshakes have failed.
 func (srv *Server) SetupConn(fd net.Conn, flags connFlag, dialDest *enode.Node) error {
 	c := &conn{fd: fd, flags: flags, cont: make(chan error)}
+	// 如果是被其他节点主动连接的 dialDest == nil
+	// 这里其实就是创建了一个 rlpx 的transport
 	if dialDest == nil {
 		c.transport = srv.newTransport(fd, nil)
 	} else {
@@ -953,6 +978,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	}
 
 	// Run the RLPx handshake.
+	// 先建立加密信道（交换密钥）
 	remotePubkey, err := c.doEncHandshake(srv.PrivateKey)
 	if err != nil {
 		srv.log.Trace("Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
@@ -964,6 +990,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 		c.node = nodeFromConn(remotePubkey, c.fd)
 	}
 	clog := srv.log.New("id", c.node.ID(), "addr", c.fd.RemoteAddr(), "conn", c.flags)
+	// 检查一下连接情况（比如说看看peer不是满了，该node是不是白名单），并且修改一下 c.flag
 	err = srv.checkpoint(c, srv.checkpointPostHandshake)
 	if err != nil {
 		clog.Trace("Rejected peer", "err", err)
@@ -971,6 +998,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	}
 
 	// Run the capability negotiation handshake.
+	// 建立业务信道，这里也没干什么，就是判断了下是否支持snappy的协议（不大懂）
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
 		clog.Trace("Failed p2p handshake", "err", err)
@@ -981,6 +1009,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 		return DiscUnexpectedIdentity
 	}
 	c.caps, c.name = phs.Caps, phs.Name
+	// 再做一下内部检查，然后将该connection放到peers列表中，相当于把这个connection缓存起来了
 	err = srv.checkpoint(c, srv.checkpointAddPeer)
 	if err != nil {
 		clog.Trace("Rejected peer", "err", err)

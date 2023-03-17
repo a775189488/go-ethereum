@@ -212,9 +212,11 @@ func Decode(input []byte) (Packet, Pubkey, []byte, error) {
 	}
 	hash, sig, sigdata := input[:macSize], input[macSize:headSize], input[headSize:]
 	shouldhash := crypto.Keccak256(input[macSize:])
+	// 这里的校验是防止数据被串改。但是其实并没有啥用，如果我把串改后的数据在 keccak256 一次. 这里也是可以被绕过的
 	if !bytes.Equal(hash, shouldhash) {
 		return nil, Pubkey{}, nil, ErrBadHash
 	}
+	// 相当于使用 sig 揭秘出公钥。这里的 sig 是发送端使用私钥加密的。如果我使用自己的私钥加密数据，然后替换掉sig，其实也是可以绕过这个检查的
 	fromKey, err := recoverNodeKey(crypto.Keccak256(input[headSize:]), sig)
 	if err != nil {
 		return nil, fromKey, hash, err

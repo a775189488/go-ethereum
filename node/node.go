@@ -53,14 +53,17 @@ type Node struct {
 	startStopLock sync.Mutex        // Start/Stop are protected by an additional lock
 	state         int               // Tracks state of node lifecycle
 
-	lock          sync.Mutex
-	lifecycles    []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
-	rpcAPIs       []rpc.API   // List of APIs currently provided by the node
-	http          *httpServer //
-	ws            *httpServer //
-	httpAuth      *httpServer //
-	wsAuth        *httpServer //
-	ipc           *ipcServer  // Stores information about the ipc http server
+	lock       sync.Mutex
+	lifecycles []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
+	rpcAPIs    []rpc.API   // List of APIs currently provided by the node
+	http       *httpServer //
+	ws         *httpServer //
+	httpAuth   *httpServer //
+	wsAuth     *httpServer //
+	// 进程间通信协议 InterProcess Communication
+	ipc *ipcServer // Stores information about the ipc http server
+	// 一些rpc接口。用于做管理的，例如管理peer。打开http服务等。
+	// 这个实体其实只给了一个接口实现，没有实现实际的协议。需要再套一层http/ws/ipc才能访问其中的接口
 	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
 
 	databases map[*closeTrackingDB]struct{} // All open databases
@@ -385,6 +388,7 @@ func (n *Node) startRPC() error {
 	}
 
 	// Configure IPC.
+	// rpcApi基本上都是admin的指令，比如打开httpserver这种。用于cli
 	if n.ipc.endpoint != "" {
 		if err := n.ipc.start(n.rpcAPIs); err != nil {
 			return err
@@ -548,6 +552,7 @@ func (n *Node) RegisterLifecycle(lifecycle Lifecycle) {
 }
 
 // RegisterProtocols adds backend's protocols to the node's p2p server.
+// 主要是由 eth 调用，传入对应的协议信息(其实就是一些接口)
 func (n *Node) RegisterProtocols(protocols []p2p.Protocol) {
 	n.lock.Lock()
 	defer n.lock.Unlock()

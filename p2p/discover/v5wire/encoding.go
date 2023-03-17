@@ -166,6 +166,18 @@ func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoar
 		msgData []byte
 		err     error
 	)
+	// 假如 A ping-> B 且 A,B 完全没有进行通信过
+	// 1. switch 首先会走default分支
+	//    session == nil
+	//    设置 header.flag = flagMessage
+	// 2. B 收到这个消息。转化为 unKnown packet
+	//    B whoareyou-> A
+	// 3. A 收到这个消息。将 whoareyou 的 challenge 设置到之前的 ping packet 中再发一次
+	//    所以这里会走 challenge != nil 这个分支
+	//    将对方的 node 加到 session 中
+	//    A ping with handshake header -> B
+	// 4. B 收到这个消息并且识别其 handshake header
+	//    添加 A session. 正常回包，并且删除 challenge 里面的信息
 	switch {
 	case packet.Kind() == WhoareyouPacket:
 		head, err = c.encodeWhoareyou(id, packet.(*Whoareyou))
@@ -187,6 +199,7 @@ func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoar
 	}
 
 	// Generate masking IV.
+	// 随机的，暂时不知道是啥玩意
 	if err := c.sc.maskingIVGen(head.IV[:]); err != nil {
 		return nil, Nonce{}, fmt.Errorf("can't generate masking IV: %v", err)
 	}
@@ -196,6 +209,7 @@ func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoar
 
 	// Store sent WHOAREYOU challenges.
 	if challenge, ok := packet.(*Whoareyou); ok {
+		// 其实写入的就是header的信息
 		challenge.ChallengeData = bytesCopy(&c.buf)
 		c.sc.storeSentHandshake(id, addr, challenge)
 	} else if msgData == nil {
@@ -264,6 +278,7 @@ func (c *Codec) encodeRandom(toID enode.ID) (Header, []byte, error) {
 
 	// Encode auth data.
 	auth := messageAuthData{SrcID: c.localnode.ID()}
+	// 随机一个 nonce
 	if _, err := crand.Read(head.Nonce[:]); err != nil {
 		return head, nil, fmt.Errorf("can't get random data: %v", err)
 	}
@@ -292,7 +307,7 @@ func (c *Codec) encodeWhoareyou(toID enode.ID, packet *Whoareyou) (Header, error
 	// Encode auth data.
 	auth := &whoareyouAuthData{
 		IDNonce:   packet.IDNonce,
-		RecordSeq: packet.RecordSeq,
+		RecordSeq: packet.RecordSeq, // 0
 	}
 	c.headbuf.Reset()
 	binary.Write(&c.headbuf, binary.BigEndian, auth)
@@ -348,16 +363,20 @@ func (c *Codec) makeHandshakeAuth(toID enode.ID, addr string, challenge *Whoarey
 	if err := challenge.Node.Load((*enode.Secp256k1)(remotePubkey)); err != nil {
 		return nil, nil, fmt.Errorf("can't find secp256k1 key for recipient")
 	}
+	// 随机生成key
 	ephkey, err := c.sc.ephemeralKeyGen()
 	if err != nil {
 		return nil, nil, fmt.Errorf("can't generate ephemeral key")
 	}
+	// 对这个随机的key加密
 	ephpubkey := EncodePubkey(&ephkey.PublicKey)
 	auth.pubkey = ephpubkey[:]
 	auth.h.PubkeySize = byte(len(auth.pubkey))
 
 	// Add ID nonce signature to response.
 	cdata := challenge.ChallengeData
+	// c.sha256 节点启动的时候随机的
+	// c.privkey 节点的私钥
 	idsig, err := makeIDSignature(c.sha256, c.privkey, cdata, ephpubkey[:], toID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("can't sign: %v", err)
@@ -389,6 +408,7 @@ func (c *Codec) encodeMessageHeader(toID enode.ID, s *session) (Header, error) {
 		return Header{}, fmt.Errorf("can't generate nonce: %v", err)
 	}
 	auth := messageAuthData{SrcID: c.localnode.ID()}
+	// 一直使用 c.buf 我理解就是减少内存创建
 	c.buf.Reset()
 	binary.Write(&c.buf, binary.BigEndian, &auth)
 	head.AuthData = bytesCopy(&c.buf)
@@ -406,6 +426,7 @@ func (c *Codec) encryptMessage(s *session, p Packet, head *Header, headerData []
 	messagePT := c.msgbuf.Bytes()
 
 	// Encrypt into message ciphertext buffer.
+	// 用对方节点的公钥匙进行签名
 	messageCT, err := encryptGCM(c.msgctbuf[:0], s.writeKey, head.Nonce[:], messagePT, headerData)
 	if err == nil {
 		c.msgctbuf = messageCT
@@ -593,11 +614,13 @@ func (c *Codec) decodeMessage(fromAddr string, head *Header, headerData, msgData
 	binary.Read(&c.reader, binary.BigEndian, &auth)
 	head.src = auth.SrcID
 
-	// Try decrypting the message.
+	// Try decrypting the message. readKey会获取 node 的session信息。如果获取不到 err == errMessageDecrypt
+	// key 是对应的节点的公钥
 	key := c.sc.readKey(auth.SrcID, fromAddr)
 	msg, err := c.decryptMessage(msgData, head.Nonce[:], headerData, key)
 	if err == errMessageDecrypt {
 		// It didn't work. Start the handshake since this is an ordinary message packet.
+		// 这个是从 src node 那随机生成的的
 		return &Unknown{Nonce: head.Nonce}, nil
 	}
 	return msg, err

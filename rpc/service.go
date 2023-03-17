@@ -50,8 +50,10 @@ type service struct {
 
 // callback is a method callback which was registered in the server
 type callback struct {
-	fn          reflect.Value  // the function
-	rcvr        reflect.Value  // receiver object of method, set if fn is method
+	fn reflect.Value // the function
+	// 这个应该是指的函数的所属对象（如果该函数不是成员方法则为空
+	rcvr reflect.Value // receiver object of method, set if fn is method
+	// 函数类型
 	argTypes    []reflect.Type // input argument types
 	hasCtx      bool           // method's first argument is a context (not included in argTypes)
 	errPos      int            // err return idx, of -1 when method cannot return error

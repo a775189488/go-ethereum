@@ -93,22 +93,31 @@ var (
 //
 type dialScheduler struct {
 	dialConfig
-	setupFunc   dialSetupFunc
-	wg          sync.WaitGroup
-	cancel      context.CancelFunc
-	ctx         context.Context
-	nodesIn     chan *enode.Node
-	doneCh      chan *dialTask
+	// 实际dial通信的函数
+	setupFunc dialSetupFunc
+	wg        sync.WaitGroup
+	cancel    context.CancelFunc
+	ctx       context.Context
+	// 从lookup中获取的node信息会先放到这里串行dial
+	nodesIn chan *enode.Node
+	// 存储已经完成dial的节点s
+	doneCh chan *dialTask
+	// 从simulate可知 addStaticCh 存的是那种调用rpc接口添加的peer信息
 	addStaticCh chan *enode.Node
 	remStaticCh chan *enode.Node
-	addPeerCh   chan *conn
-	remPeerCh   chan *conn
+	// 已经dial成功(完成了handshake)的node先放在这里串行addPeer
+	addPeerCh chan *conn
+	// 用于串行处理需要删除的节点
+	remPeerCh chan *conn
 
 	// Everything below here belongs to loop and
 	// should only be accessed by code on the loop goroutine.
-	dialing   map[enode.ID]*dialTask // active tasks
-	peers     map[enode.ID]struct{}  // all connected peers
-	dialPeers int                    // current number of dialed peers
+	// 正在进行dial的节点信息
+	dialing map[enode.ID]*dialTask // active tasks
+	// peer信息
+	peers map[enode.ID]struct{} // all connected peers
+	// 已经addPeer的node数量
+	dialPeers int // current number of dialed peers
 
 	// The static map tracks all static dial tasks. The subset of usable static dial tasks
 	// (i.e. those passing checkDial) is kept in staticPool. The scheduler prefers
@@ -118,6 +127,7 @@ type dialScheduler struct {
 	staticPool []*dialTask
 
 	// The dial history keeps recently dialed nodes. Members of history are not dialed.
+	// 用来存最近dial的node信息，用于防止频繁通信
 	history          expHeap
 	historyTimer     mclock.Timer
 	historyTimerTime mclock.AbsTime
@@ -134,11 +144,12 @@ type dialConfig struct {
 	maxDialPeers   int              // maximum number of dialed peers
 	maxActiveDials int              // maximum number of active dials
 	netRestrict    *netutil.Netlist // IP netrestrict list, disabled if nil
-	resolver       nodeResolver
-	dialer         NodeDialer
-	log            log.Logger
-	clock          mclock.Clock
-	rand           *mrand.Rand
+	// 也就是discover里面的 udpv4 / udpv5
+	resolver nodeResolver
+	dialer   NodeDialer
+	log      log.Logger
+	clock    mclock.Clock
+	rand     *mrand.Rand
 }
 
 func (cfg dialConfig) withDefaults() dialConfig {
@@ -177,7 +188,9 @@ func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupF
 	d.lastStatsLog = d.clock.Now()
 	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.wg.Add(2)
+	// 其实就是从discovery里不断读新的node信息
 	go d.readNodes(it)
+	// 处理读到的新的node信息
 	go d.loop(it)
 	return d
 }
@@ -242,19 +255,25 @@ loop:
 
 		select {
 		case node := <-nodesCh:
+			// 检查下是不是有效的node
 			if err := d.checkDial(node); err != nil {
 				d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
 			} else {
+				// 如果有效，就开始通信
+				//  1. 会将nodeID放到 h.history 里面用于检查是否频繁加入(看名字好像是个堆结构)
+				//  2. 会将task保留在 h.dialing 里面。表示正在建立连接，连接成功后会从其中删除
 				d.startDial(newDialTask(node, dynDialedConn))
 			}
 
 		case task := <-d.doneCh:
 			id := task.dest.ID()
+			// 连接成功，删除 h.dialing 的缓存
 			delete(d.dialing, id)
 			d.updateStaticPool(id)
 			d.doneSinceLastLog++
 
 		case c := <-d.addPeerCh:
+			// 建立连接成功后，就是实例化成peer并且加到缓存
 			if c.is(dynDialedConn) || c.is(staticDialedConn) {
 				d.dialPeers++
 			}
@@ -268,6 +287,7 @@ loop:
 			// TODO: cancel dials to connected peers
 
 		case c := <-d.remPeerCh:
+			// 处理删除peer的逻辑
 			if c.is(dynDialedConn) || c.is(staticDialedConn) {
 				d.dialPeers--
 			}

@@ -84,10 +84,14 @@ func (m SchemeMap) NodeAddr(r *Record) []byte {
 
 // Record represents a node record. The zero value is an empty record.
 type Record struct {
-	seq       uint64 // sequence number
+	// 序列号
+	seq uint64 // sequence number
+	// 特征值
 	signature []byte // the signature
-	raw       []byte // RLP encoded record
-	pairs     []pair // sorted list of all key/value pairs
+	// 整体加密后的数据
+	raw []byte // RLP encoded record
+	// 携带的数据 其实就是 kv
+	pairs []pair // sorted list of all key/value pairs
 }
 
 // pair is a key/value pair in a record.
@@ -138,18 +142,22 @@ func (r *Record) Set(e Entry) {
 
 	pairs := make([]pair, len(r.pairs))
 	copy(pairs, r.pairs)
+	// 寻找key对应的位置，如果有相同的key就返回位置，如果没有就返回插入位置
 	i := sort.Search(len(pairs), func(i int) bool { return pairs[i].k >= e.ENRKey() })
 	switch {
 	case i < len(pairs) && pairs[i].k == e.ENRKey():
+		// 相当于更新
 		// element is present at r.pairs[i]
 		pairs[i].v = blob
 	case i < len(r.pairs):
+		// 找到了插入位置并且位置不是最后。需要进行列表元素的插入（涉及i后续元素的插入）
 		// insert pair before i-th elem
 		el := pair{e.ENRKey(), blob}
 		pairs = append(pairs, pair{})
 		copy(pairs[i+1:], pairs[i:])
 		pairs[i] = el
 	default:
+		// 插入位置是最后则直接插入即可
 		// element should be placed at the end of r.pairs
 		pairs = append(pairs, pair{e.ENRKey(), blob})
 	}

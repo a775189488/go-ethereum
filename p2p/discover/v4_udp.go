@@ -150,7 +150,9 @@ func ListenV4(c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
 	go tab.loop()
 
 	t.wg.Add(2)
+
 	go t.loop()
+	// 开协程读取socket数据
 	go t.readLoop(cfg.Unhandled)
 	return t, nil
 }
@@ -172,6 +174,7 @@ func (t *UDPv4) Close() {
 
 // Resolve searches for a specific node with the given ID and tries to get the most recent
 // version of the node record for it. It returns n if the node could not be resolved.
+// 单独查询某个节点的具体信息
 func (t *UDPv4) Resolve(n *enode.Node) *enode.Node {
 	// Try asking directly. This works if the node is still responding on the endpoint we have.
 	if rn, err := t.RequestENR(n); err == nil {
@@ -289,6 +292,7 @@ func (t *UDPv4) newRandomLookup(ctx context.Context) *lookup {
 
 func (t *UDPv4) newLookup(ctx context.Context, targetKey encPubkey) *lookup {
 	target := enode.ID(crypto.Keccak256Hash(targetKey[:]))
+	// 这个key是当前节点的key
 	ekey := v4wire.Pubkey(targetKey)
 	it := newLookup(ctx, t.tab, target, func(n *node) ([]*node, error) {
 		return t.findnode(n.ID(), n.addr(), ekey)
@@ -299,12 +303,17 @@ func (t *UDPv4) newLookup(ctx context.Context, targetKey encPubkey) *lookup {
 // findnode sends a findnode request to the given node and waits until
 // the node has sent up to k neighbors.
 func (t *UDPv4) findnode(toid enode.ID, toaddr *net.UDPAddr, target v4wire.Pubkey) ([]*node, error) {
+	// 这个实际上就是会ping一下，会阻塞。但是不会管是否ping成功了
+	// 这里需要注意的是，如果ping成功了，对方会把当前节点添加到他自己的seen节点中。当下面进行findnode时，可能会包含当前节点（如果对方节点很多就不会）
 	t.ensureBond(toid, toaddr)
 
 	// Add a matcher for 'neighbours' replies to the pending reply queue. The matcher is
 	// active until enough nodes have been received.
 	nodes := make([]*node, 0, bucketSize)
 	nreceived := 0
+	// 这个其实就是比较原始的udp通信方式
+	//  1. t.pending 实际上是添加一个回包监听。且在发包后会阻塞直到回包已经接收并处理完成
+	//  2. t.send    实际发送对应的包
 	rm := t.pending(toid, toaddr.IP, v4wire.NeighborsPacket, func(r v4wire.Packet) (matched bool, requestDone bool) {
 		reply := r.(*v4wire.Neighbors)
 		for _, rn := range reply.Nodes {
@@ -439,6 +448,15 @@ func (t *UDPv4) loop() {
 		timeout.Stop()
 	}
 
+	// 所以发送一个请求的处理逻辑应该是这个。例如 ping
+	// 1. 先构造一个回包的处理任务，存入 addReplyMatcher 中
+	// 2. addReplyMatcher 串行处理这些这些任务（其实就是将它发送到一个列表中 plist
+	// 3. 使用 socket 发送对应的请求给目标端
+	// 4. 目标端收到 ping 请求后 返回了一个 pong 请求，然后就阻塞了，直到处理任务被回调
+	// 5. 当前节点处理完 pong 请求后就构造一个和回包处理任务数据对应的数据放入 gotreply 中
+	// 6. gotreplay 串行处理这些数据，并且和 plist 里面的回包任务匹配并处理（主要是调用 callback，将对应的resp放到处理任务中
+	// 7. 将对应的回包处理任务从 plist 中删除
+	// 疑问：我理解他这么设计的目的是为了串行处理回包。否则直接也给 pong 一个处理函数就可以并发处理了，但是为什么要串行处理呢？
 	for {
 		resetTimeout()
 
@@ -450,6 +468,7 @@ func (t *UDPv4) loop() {
 			return
 
 		case p := <-t.addReplyMatcher:
+			// 回包监听。这里只是将它推送到list里面而已
 			p.deadline = time.Now().Add(respTimeout)
 			plist.PushBack(p)
 
@@ -475,6 +494,7 @@ func (t *UDPv4) loop() {
 		case now := <-timeout.C:
 			nextTimeout = nil
 
+			// 这里只是定时处理plist里面的那些过期的回包信息。
 			// Notify and remove callbacks whose deadline is in the past.
 			for el := plist.Front(); el != nil; el = el.Next() {
 				p := el.Value.(*replyMatcher)
@@ -517,6 +537,7 @@ func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 		defer close(unhandled)
 	}
 
+	// 其实处理请求也是串行的
 	buf := make([]byte, maxPacketSize)
 	for {
 		nbytes, from, err := t.conn.ReadFromUDP(buf)
@@ -643,6 +664,7 @@ type packetHandlerV4 struct {
 func (t *UDPv4) verifyPing(h *packetHandlerV4, from *net.UDPAddr, fromID enode.ID, fromKey v4wire.Pubkey) error {
 	req := h.Packet.(*v4wire.Ping)
 
+	// 能 decode 成功就算ok
 	senderKey, err := v4wire.DecodePubkey(crypto.S256(), fromKey)
 	if err != nil {
 		return err
@@ -667,6 +689,9 @@ func (t *UDPv4) handlePing(h *packetHandlerV4, from *net.UDPAddr, fromID enode.I
 
 	// Ping back if our last pong on file is too far in the past.
 	n := wrapNode(enode.NewV4(h.senderKey, from.IP, int(req.From.TCP), from.Port))
+	// 先查一下最后ping的时间有没有超过24小时，如果超过了则回ping一下
+	// 如果是新节点 LastPongReceived 返回0。time.Since(0) 会是一个很大的数，所以这个逻辑一定会走到
+	// 被 ping 了就会将 node 信息存到 tab 中。
 	if time.Since(t.db.LastPongReceived(n.ID(), from.IP)) > bondExpiration {
 		t.sendPing(fromID, from, func() {
 			t.tab.addVerifiedNode(n)

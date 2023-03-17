@@ -199,7 +199,9 @@ func (buf *encBuffer) encodeStringHeader(size int) {
 	if size < 56 {
 		buf.str = append(buf.str, 0x80+byte(size))
 	} else {
+		// 计算 BE(||x||)
 		sizesize := putint(buf.sizebuf[1:], uint64(size))
+		// 计算 183 + ||BE(||x||)||
 		buf.sizebuf[0] = 0xB7 + byte(sizesize)
 		buf.str = append(buf.str, buf.sizebuf[:sizesize+1]...)
 	}

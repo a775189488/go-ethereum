@@ -31,9 +31,14 @@ import (
 
 //a map of mocker names to its function
 var mockerList = map[string]func(net *Network, quit chan struct{}, nodeCount int){
-	"startStop":     startStop,
+	// 1. 随机创建n个节点，将他们启动，然后随机互相连接
+	// 2. 创建一个定时器随机启停节点
+	"startStop": startStop,
+	// 1. 随机创建n个节点，将他们启动，然后随机互相连接
+	// 2. 创建一个定时器批量随机启停节点
 	"probabilistic": probabilistic,
-	"boot":          boot,
+	// 1. 随机创建n个节点，将他们启动，然后随机互相连接
+	"boot": boot,
 }
 
 //Lookup a mocker by its name, returns the mockerFn

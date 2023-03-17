@@ -143,3 +143,12 @@ func TestID_logdistEqual(t *testing.T) {
 		t.Errorf("LogDist(x, x) != 0")
 	}
 }
+
+func TestID_logdistEqual_Me(t *testing.T) {
+	x := ID{4}
+	y := ID{7}
+	r := LogDist(x, y)
+	if r == 0 {
+		t.Errorf("LogDist(x, x) != 0")
+	}
+}

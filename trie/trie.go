@@ -310,7 +310,17 @@ func (t *Trie) TryUpdate(key, value []byte) error {
 	return nil
 }
 
+// param:
+//   n: 需要插入的节点
+//   prefix: 已经处理的前缀 [比如说插入chain 父节点存了cha 需要插子节点in]
+//   key: 需要处理的信息 [结合上文的 in]
+//   value: 需要插入的值
+// return:
+//   bool: 是否进行了修改
+//   node: 修改之后的根节点
+//   err:  error信息
 func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error) {
+	// 如果 key 和当前要插入的 node 的key一致，就直接返回
 	if len(key) == 0 {
 		if v, ok := n.(valueNode); ok {
 			return !bytes.Equal(v, value.(valueNode)), value, nil
@@ -318,7 +328,7 @@ func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error
 		return true, value, nil
 	}
 	switch n := n.(type) {
-	case *shortNode:
+	case *shortNode: //叶子节点
 		matchlen := prefixLen(key, n.Key)
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
@@ -341,6 +351,7 @@ func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error
 			return false, nil, err
 		}
 		// Replace this shortNode with the branch if it occurs at index 0.
+		// 当2个node的key完全没有相同前缀时。直接使用fullnode作为父节点
 		if matchlen == 0 {
 			return true, branch, nil
 		}
@@ -353,6 +364,7 @@ func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error
 		return true, &shortNode{key[:matchlen], branch, t.newFlag()}, nil
 
 	case *fullNode:
+		// 非叶子
 		dirty, nn, err := t.insert(n.Children[key[0]], append(prefix, key[0]), key[1:], value)
 		if !dirty || err != nil {
 			return false, n, err
