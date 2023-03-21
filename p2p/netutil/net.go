@@ -280,15 +280,21 @@ func (s *DistinctNetSet) key(ip net.IP) net.IP {
 	if ip4 := ip.To4(); ip4 != nil {
 		typ, ip = '4', ip4
 	}
+	// s.Subnet 默认是 24
 	bits := s.Subnet
+	// 如果是ip4 bits < 4*8
+	// bits = 24
 	if bits > uint(len(ip)*8) {
 		bits = uint(len(ip) * 8)
 	}
 	// Encode the prefix into s.buf.
+	// nb = 3
 	nb := int(bits / 8)
 	mask := ^byte(0xFF >> (bits % 8))
 	s.buf[0] = typ
+	// 比如说是 127.0.0.1
 	buf := append(s.buf[:1], ip[:nb]...)
+	// mask 在 ipv6时候用？
 	if nb < len(ip) && mask != 0 {
 		buf = append(buf, ip[nb]&mask)
 	}

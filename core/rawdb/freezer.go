@@ -115,6 +115,13 @@ func NewFreezer(datadir string, namespace string, readonly bool, maxTableSize ui
 	}
 
 	// Create the tables.
+	//var FreezerNoSnappy = map[string]bool{
+	//	freezerHeaderTable:     false,
+	//	freezerHashTable:       true,
+	//	freezerBodiesTable:     false,
+	//	freezerReceiptTable:    false,
+	//	freezerDifficultyTable: true,
+	//}
 	for name, disableSnappy := range tables {
 		table, err := newTable(datadir, name, readMeter, writeMeter, sizeGauge, maxTableSize, disableSnappy, readonly)
 		if err != nil {

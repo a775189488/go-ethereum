@@ -65,16 +65,23 @@ const (
 
 // UDPv4 implements the v4 wire protocol.
 type UDPv4 struct {
-	conn        UDPConn
-	log         log.Logger
+	// udp连接对象
+	conn UDPConn
+	log  log.Logger
+	// 定义了一些ip黑名单
 	netrestrict *netutil.Netlist
-	priv        *ecdsa.PrivateKey
-	localNode   *enode.LocalNode
-	db          *enode.DB
-	tab         *Table
-	closeOnce   sync.Once
-	wg          sync.WaitGroup
+	// 节点私钥匙
+	priv *ecdsa.PrivateKey
+	// 本地节点
+	localNode *enode.LocalNode
+	// 保存节点信息的逻辑db。根据配置会使用leveldb或者内存db
+	db *enode.DB
+	// 保存节点信息，并使用图划分节点距离
+	tab       *Table
+	closeOnce sync.Once
+	wg        sync.WaitGroup
 
+	// 回包检测channel
 	addReplyMatcher chan *replyMatcher
 	gotreply        chan reply
 	closeCtx        context.Context

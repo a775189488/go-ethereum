@@ -206,6 +206,7 @@ func newTable(path string, name string, readMeter metrics.Meter, writeMeter metr
 	return tab, nil
 }
 
+// [cross-checks: 再次检查] 当发生程序崩溃或者数据丢失的时候进行数据修复
 // repair cross-checks the head and the index file and truncates them to
 // be in sync with each other after a potential crash / data loss.
 func (t *freezerTable) repair() error {
@@ -217,6 +218,7 @@ func (t *freezerTable) repair() error {
 	if err != nil {
 		return err
 	}
+	// geth init的时候会写0值
 	if stat.Size() == 0 {
 		if _, err := t.index.Write(buffer); err != nil {
 			return err
@@ -241,7 +243,9 @@ func (t *freezerTable) repair() error {
 	)
 	// Read index zero, determine what file is the earliest
 	// and what item offset to use
+	// 相当于从index file头开始读到buffer中
 	t.index.ReadAt(buffer, 0)
+	// 将buffer信息unmarshal到firstIndex中
 	firstIndex.unmarshalBinary(buffer)
 
 	// Assign the tail fields with the first stored index.
@@ -591,8 +595,10 @@ func (t *freezerTable) openFile(num uint32, opener func(string) (*os.File, error
 	if f, exist = t.files[num]; !exist {
 		var name string
 		if t.noCompression {
+			// eg: headers.0000.rdat
 			name = fmt.Sprintf("%s.%04d.rdat", t.name, num)
 		} else {
+			// eg: headers.0000.cdat
 			name = fmt.Sprintf("%s.%04d.cdat", t.name, num)
 		}
 		f, err = opener(filepath.Join(t.path, name))

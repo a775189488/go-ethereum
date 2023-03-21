@@ -65,10 +65,11 @@ const (
 // itself up-to-date by verifying the liveness of neighbors and requesting their node
 // records when announcements of a new record version are received.
 type Table struct {
+	// buckets操作需要加锁
 	mutex sync.Mutex // protects buckets, bucket content, nursery, rand
 	// p2p节点信息。按照节点距离(距离节点也是经过掩码运算的，比如说小于238的都放在0号)为链表
 	buckets [nBuckets]*bucket // index of known nodes by distance
-	// 这些好像是在cmd启动中指定的node
+	// 启动时配置的node几点
 	nursery []*node // bootstrap nodes
 	// 大数随机种子
 	rand *mrand.Rand // source of randomness, periodically reseeded
@@ -76,9 +77,10 @@ type Table struct {
 	ips netutil.DistinctNetSet
 
 	log log.Logger
-	db  *enode.DB // database of known nodes
+	// 逻辑db
+	db *enode.DB // database of known nodes
 
-	// 具体的服务发现协议。用于发送请求，接受请求等
+	// 具体的服务发现协议。用于发送请求，接受请求等. 其实就是disv4或者v5
 	net        transport
 	refreshReq chan chan struct{}
 	initDone   chan struct{}
@@ -101,9 +103,10 @@ type transport interface {
 // that was most recently active is the first element in entries.
 type bucket struct {
 	entries []*node // live entries, sorted by time of last contact
-	// 代替节点？当发现的node数量大于entries的容量时就会放到这里（我理解应该不会参与运算
+	// 代替节点？当发现的node数量大于entries的容量时就会放到这里
 	replacements []*node // recently seen nodes to be used if revalidation fails
-	ips          netutil.DistinctNetSet
+	// 存储entries的ip信息，主要是为了防止dos或者单个ip过多连接
+	ips netutil.DistinctNetSet
 }
 
 func newTable(t transport, db *enode.DB, bootnodes []*enode.Node, log log.Logger) (*Table, error) {
@@ -289,9 +292,7 @@ loop:
 func (tab *Table) doRefresh(done chan struct{}) {
 	defer close(done)
 
-	// Load nodes from the database and insert
-	// them. This should yield a few previously seen nodes that are
-	// (hopefully) still alive.
+	// 从 leveldb 中读取之前已经发现的节点
 	tab.loadSeedNodes()
 
 	// Run self lookup to discover new neighbor nodes.
@@ -461,6 +462,7 @@ func (tab *Table) bucket(id enode.ID) *bucket {
 }
 
 func (tab *Table) bucketAtDistance(d int) *bucket {
+	// bucketMinDistance = 239
 	if d <= bucketMinDistance {
 		return tab.buckets[0]
 	}
