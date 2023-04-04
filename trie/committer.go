@@ -112,6 +112,7 @@ func (c *committer) commit(n node, db *Database) (node, int, error) {
 			return nil, 0, err
 		}
 		collapsed := cn.copy()
+		// 这里需要注意的是 child 换成了 hashnode
 		collapsed.Children = hashedKids
 
 		hashedNode := c.store(collapsed, db)

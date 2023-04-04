@@ -56,6 +56,9 @@ func returnHasherToPool(h *hasher) {
 
 // hash collapses a node down into a hash node, also returning a copy of the
 // original node initialized with the computed hash to replace the original one.
+// 返回2个node:
+//  1. hashnode 表示当前node哈希后的值
+//  2. 返回一个原node(shortnode或者fullnode)。但是写入了 flags.hash 的值
 func (h *hasher) hash(n node, force bool) (hashed node, cached node) {
 	// Return the cached hash if it's available
 	if hash, _ := n.cache(); hash != nil {

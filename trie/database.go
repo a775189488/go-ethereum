@@ -322,6 +322,7 @@ func (db *Database) insert(hash common.Hash, size int, node node) {
 		size:      uint16(size),
 		flushPrev: db.newest,
 	}
+	// parents 一般是指 fullnode
 	entry.forChilds(func(child common.Hash) {
 		if c := db.dirties[child]; c != nil {
 			c.parents++

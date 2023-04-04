@@ -33,7 +33,7 @@ type lookup struct {
 	// 用于临时存放从db中加载的和实际查询到的结果。后续还需要将其push到result中，我理解其实是解藕异步处理
 	replyCh  chan []*node
 	cancelCh <-chan struct{}
-	// seen 被发现的节点。就不会被重复push
+	// seen 被发现的节点。就不会被重复push到result
 	// asked 已经询问的节点。就不会被发送请求进行询问
 	asked, seen map[enode.ID]bool
 	// 存放距离目标node由近到远的节点

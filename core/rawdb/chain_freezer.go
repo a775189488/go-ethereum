@@ -61,7 +61,8 @@ func newChainFreezer(datadir string, namespace string, readonly bool, maxTableSi
 		return nil, err
 	}
 	return &chainFreezer{
-		Freezer:   freezer,
+		Freezer: freezer,
+		// 90000
 		threshold: params.FullImmutabilityThreshold,
 		quit:      make(chan struct{}),
 		trigger:   make(chan chan struct{}),
@@ -121,8 +122,11 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 			backoff = true
 			continue
 		}
+		// 获取头部的header，如果当前只初始化了上帝区块，那么number会是0
 		number := ReadHeaderNumber(nfdb, hash)
+		// f.threshold 90000 需要freeze的域值
 		threshold := atomic.LoadUint64(&f.threshold)
+		// 已经 freeze 的区块
 		frozen := atomic.LoadUint64(&f.frozen)
 		switch {
 		case number == nil:

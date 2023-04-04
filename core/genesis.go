@@ -54,8 +54,10 @@ type Genesis struct {
 	GasLimit   uint64              `json:"gasLimit"   gencodec:"required"`
 	Difficulty *big.Int            `json:"difficulty" gencodec:"required"`
 	Mixhash    common.Hash         `json:"mixHash"`
-	Coinbase   common.Address      `json:"coinbase"`
-	Alloc      GenesisAlloc        `json:"alloc"      gencodec:"required"`
+	// 出块奖励地址和一些额外的信息
+	Coinbase common.Address `json:"coinbase"`
+	// 创世区块中指定的账户存款
+	Alloc GenesisAlloc `json:"alloc"      gencodec:"required"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
@@ -157,11 +159,16 @@ func CommitGenesisState(db ethdb.Database, hash common.Hash) error {
 
 // GenesisAccount is an account in the state of the genesis block.
 type GenesisAccount struct {
-	Code       []byte                      `json:"code,omitempty"`
-	Storage    map[common.Hash]common.Hash `json:"storage,omitempty"`
-	Balance    *big.Int                    `json:"balance" gencodec:"required"`
-	Nonce      uint64                      `json:"nonce,omitempty"`
-	PrivateKey []byte                      `json:"secretKey,omitempty"` // for tests
+	// 感觉这个是智能合约的代码或者字节码
+	Code []byte `json:"code,omitempty"`
+	//todo 这个和 solidity 的 stroage 的变量有关系吗
+	Storage map[common.Hash]common.Hash `json:"storage,omitempty"`
+	// 存款
+	Balance *big.Int `json:"balance" gencodec:"required"`
+	// 工作证明
+	Nonce uint64 `json:"nonce,omitempty"`
+	// 测试用
+	PrivateKey []byte `json:"secretKey,omitempty"` // for tests
 }
 
 // field type overrides for gencodec
@@ -238,7 +245,9 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 		return params.AllEthashProtocolChanges, common.Hash{}, errGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
+	// 0 号就是创世区块. 对应的是创世区块的 hash 值
 	stored := rawdb.ReadCanonicalHash(db, 0)
+	// geth init 的时候是走以下的分支，因为根本没有任何的区块
 	if (stored == common.Hash{}) {
 		if genesis == nil {
 			log.Info("Writing default main-net genesis block")
@@ -254,6 +263,7 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 	}
 	// We have the genesis block in database(perhaps in ancient database)
 	// but the corresponding state is missing.
+	// (bnum + hhash) -> bheader
 	header := rawdb.ReadHeader(db, stored, 0)
 	if _, err := state.New(header.Root, state.NewDatabaseWithConfig(db, nil), nil); err != nil {
 		if genesis == nil {
@@ -354,6 +364,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) *types.Block {
 		panic(err)
 	}
 	head := &types.Header{
+		// 0 上帝区块区块高度本来就是 0 吧
 		Number:     new(big.Int).SetUint64(g.Number),
 		Nonce:      types.EncodeNonce(g.Nonce),
 		Time:       g.Timestamp,
@@ -365,7 +376,8 @@ func (g *Genesis) ToBlock(db ethdb.Database) *types.Block {
 		Difficulty: g.Difficulty,
 		MixDigest:  g.Mixhash,
 		Coinbase:   g.Coinbase,
-		Root:       root,
+		// 注意 root 是 alloc 的 hash
+		Root: root,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -400,16 +412,27 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, error) {
 	if config.Clique != nil && len(block.Extra()) < 32+crypto.SignatureLength {
 		return nil, errors.New("can't start clique chain without signers")
 	}
+
+	// keyprefix: ethereum-genesis-
 	if err := g.Alloc.write(db, block.Hash()); err != nil {
 		return nil, err
 	}
+	// total difficulty
+	// (bnum + bhash) -> bdiff
 	rawdb.WriteTd(db, block.Hash(), block.NumberU64(), block.Difficulty())
+	// (bnum + bhash) -> bbhash
+	//  hhash -> number
+	// (bnum + hhash) -> bheader
 	rawdb.WriteBlock(db, block)
 	rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), nil)
+	// bnum -> bhash
 	rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
+	// 因为当前是上帝区块，所以也是头部区块，相当于多写了一份
 	rawdb.WriteHeadBlockHash(db, block.Hash())
+	//todo fastblock是干啥用的
 	rawdb.WriteHeadFastBlockHash(db, block.Hash())
 	rawdb.WriteHeadHeaderHash(db, block.Hash())
+	// keyprefix: ethereum-config-
 	rawdb.WriteChainConfig(db, block.Hash(), config)
 	return block, nil
 }

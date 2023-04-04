@@ -34,7 +34,7 @@ type node interface {
 }
 
 type (
-	// root几点下的17node没有共同的key时。rootnode为fullNode 否则为shortNode
+	// root节点下的17node没有共同的key时。rootnode为fullNode 否则为shortNode
 	fullNode struct {
 		// 为什么是17？以为做了半哈希处理，单个byte不会超过16
 		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)

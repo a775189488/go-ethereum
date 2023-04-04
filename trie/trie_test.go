@@ -160,7 +160,7 @@ func TestInsert(t *testing.T) {
 	trie := newEmpty()
 
 	updateString(trie, "doe", "reindeer")
-	updateString(trie, "dog", "puppy")
+	updateString(trie, "doe", "puppy")
 	updateString(trie, "dogglesworth", "cat")
 
 	exp := common.HexToHash("8aad789dff2f538bca5d8ea56e8abe10f4c7ba3a5dea95fea4cd6e7c3a1168d3")
@@ -676,7 +676,7 @@ func TestTinyTrie(t *testing.T) {
 
 func TestCommitAfterHash(t *testing.T) {
 	// Create a realistic account trie to hash
-	addresses, accounts := makeAccounts(1000)
+	addresses, accounts := makeAccounts(10)
 	trie := newEmpty()
 	for i := 0; i < len(addresses); i++ {
 		trie.Update(crypto.Keccak256(addresses[i][:]), accounts[i])

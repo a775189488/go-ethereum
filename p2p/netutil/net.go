@@ -178,9 +178,11 @@ func CheckRelayIP(sender, addr net.IP) error {
 	if len(addr) != net.IPv4len && len(addr) != net.IPv6len {
 		return errInvalid
 	}
+	// 校验是不是特殊的ip比如说 0.0.0.0
 	if addr.IsUnspecified() {
 		return errUnspecified
 	}
+
 	if IsSpecialNetwork(addr) {
 		return errSpecial
 	}

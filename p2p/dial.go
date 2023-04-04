@@ -123,6 +123,7 @@ type dialScheduler struct {
 	// (i.e. those passing checkDial) is kept in staticPool. The scheduler prefers
 	// launching random static tasks from the pool over launching dynamic dials from the
 	// iterator.
+	// 用来存储在 addPeerch 添加的Peers信息
 	static     map[enode.ID]*dialTask
 	staticPool []*dialTask
 

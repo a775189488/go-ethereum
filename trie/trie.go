@@ -67,6 +67,7 @@ type Trie struct {
 	// Keep track of the number leaves which have been inserted since the last
 	// hashing operation. This number will not directly map to the number of
 	// actually unhashed nodes
+	// 没有hash的节点数量
 	unhashed int
 
 	// tracer is the state diff tracer can be used to track newly added/deleted
@@ -293,6 +294,7 @@ func (t *Trie) TryUpdateAccount(key []byte, acc *types.StateAccount) error {
 // If a node was not found in the database, a MissingNodeError is returned.
 func (t *Trie) TryUpdate(key, value []byte) error {
 	t.unhashed++
+	// 这样做的目的是保证 key 的每个 byte 都不大于 16。因为 full node 只有 17 个子节点
 	k := keybytesToHex(key)
 	if len(value) != 0 {
 		_, n, err := t.insert(t.root, nil, k, valueNode(value))
@@ -328,20 +330,38 @@ func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error
 		return true, value, nil
 	}
 	switch n := n.(type) {
-	case *shortNode: //叶子节点
+	case *shortNode:
+		// 比较当前节点n的key和需要插入的key的共同前缀数量
 		matchlen := prefixLen(key, n.Key)
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
+		// 两种情况
+		//  1. n.Value 为 valuenode 那么就直接更新 valuenode 的value值
+		//  2. n.Value 为 fullnode  那么说明该 fullnode 和当前key的公共前缀相同，直接插入
 		if matchlen == len(n.Key) {
 			dirty, nn, err := t.insert(n.Val, append(prefix, key[:matchlen]...), key[matchlen:], value)
 			if !dirty || err != nil {
 				return false, n, err
 			}
+			// 这里需要注意的是 t.NewFlag 的 dirty = true 相当于如果之前hash过这个节点，在commit时需要在进行一次hash
 			return true, &shortNode{n.Key, nn, t.newFlag()}, nil
 		}
 		// Otherwise branch out at the index where they differ.
+		// 如果之前是 shortnode 插入了有共同前缀的节点，就会分裂为 fullnode
 		branch := &fullNode{flags: t.newFlag()}
 		var err error
+		// 在新的 fullnode 中插入当前的 node
+		// 假如现在 n 是插入节点 c 是待插入节点
+		// 对于 n 之前是一个 shortnode ,key = [1, 2, 3, 4, 5]
+		//	n.key = [1, 2, 3, 4, 5]
+		//  c.key = [1, 2, 3, 7, 8]
+		//  那么 matchlen = 3
+		//  fullnode.Children[4] = n
+		//  	n.Key = 5
+		//  fullnode.Children[7] = c
+		//      c.Key = 8
+		//  fullnode.Key = [1, 2, 3]
+		// 在新的 fullnode 中插入新的 node
 		_, branch.Children[n.Key[matchlen]], err = t.insert(nil, append(prefix, n.Key[:matchlen+1]...), n.Key[matchlen+1:], n.Val)
 		if err != nil {
 			return false, nil, err
@@ -351,7 +371,8 @@ func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error
 			return false, nil, err
 		}
 		// Replace this shortNode with the branch if it occurs at index 0.
-		// 当2个node的key完全没有相同前缀时。直接使用fullnode作为父节点
+		// 当2个node的key完全没有相同前缀时。直接使用fullnode作为父节点. 注意这个 fullnode 的 key 为空，说明没有共同的前缀
+		// 有相同前缀时才会再套一层 shortnode 因为 fullnode 是没有 key 的
 		if matchlen == 0 {
 			return true, branch, nil
 		}
@@ -364,17 +385,19 @@ func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error
 		return true, &shortNode{key[:matchlen], branch, t.newFlag()}, nil
 
 	case *fullNode:
-		// 非叶子
+		// 为什么直接使用 key[0] 因为在上一步已经去除掉了 key 中公共前缀的部分了 key[0] 一定是不同的
 		dirty, nn, err := t.insert(n.Children[key[0]], append(prefix, key[0]), key[1:], value)
 		if !dirty || err != nil {
 			return false, n, err
 		}
+		//todo 没懂为什么需要copy n.Children[key[0]] = nn 不行吗
 		n = n.copy()
 		n.flags = t.newFlag()
 		n.Children[key[0]] = nn
 		return true, n, nil
 
 	case nil:
+		// 空树插入第一个节点时走也走这个逻辑
 		// New short node is created and track it in the tracer. The node identifier
 		// passed is the path from the root node. Note the valueNode won't be tracked
 		// since it's always embedded in its parent.
@@ -448,6 +471,7 @@ func (t *Trie) delete(n node, prefix, key []byte) (bool, node, error) {
 			return false, n, err
 		}
 		switch child := child.(type) {
+		// 为 shortNode 的话是 fullnode 合并而来，所以需要加上前缀
 		case *shortNode:
 			// The child shortNode is merged into its parent, track
 			// is deleted as well.
@@ -501,7 +525,16 @@ func (t *Trie) delete(n node, prefix, key []byte) (bool, node, error) {
 				}
 			}
 		}
+		// pos == -2 说明当前的 fullnode 有2个节点或以上，无需删除
+		// pos >= -2 说明当前的 fullnode 只有一个节点了，需要替换为 shortNode
+		// pos 一定不为 -1 因为如果为 -1 说明 fullnode 删除前只有一个child了，但是这种情况下会所容为shortnode
 		if pos >= 0 {
+			// 这里魔术字很坑爹说实话
+			//  首先 insert 的时候会对 key 进行半哈希编码，确保 key 的每个 byte 小于等于16
+			//  对于 key 的每个原始 byte 会拆分为2部分
+			//   1. a = byte / 16 (byte 是8位，最大为255，因此除16一定小于16)
+			//   2. b = byte % 16
+			//  而当 pos = 16 说明当前已经是这个 key 的结尾了 [keybytesToHex这个函数实现的]（类似于\0）可以不用处理了因为后面不可能在有节点了
 			if pos != 16 {
 				// If the remaining entry is a short node, it replaces
 				// n and its key gets the missing nibble tacked to the
