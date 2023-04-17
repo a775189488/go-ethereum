@@ -80,6 +80,7 @@ type stateObject struct {
 	trie Trie // storage trie, which becomes non-nil on first access
 	code Code // contract bytecode, which gets set when code is loaded
 
+	// 合约账户使用。eoa账户以下都没有值
 	originStorage  Storage // Storage cache of original entries to dedup rewrites, reset for every transaction
 	pendingStorage Storage // Storage entries that need to be flushed to disk, at the end of an entire block
 	dirtyStorage   Storage // Storage entries that have been modified in the current transaction execution
@@ -286,6 +287,7 @@ func (s *stateObject) setState(key, value common.Hash) {
 
 // finalise moves all dirty storage slots into the pending area to be hashed or
 // committed later. It is invoked at the end of every transaction.
+// eoa账户在这个账户没啥做的
 func (s *stateObject) finalise(prefetch bool) {
 	slotsToPrefetch := make([][]byte, 0, len(s.dirtyStorage))
 	for key, value := range s.dirtyStorage {
@@ -307,6 +309,7 @@ func (s *stateObject) finalise(prefetch bool) {
 func (s *stateObject) updateTrie(db Database) Trie {
 	// Make sure all dirty slots are finalized into the pending storage area
 	s.finalise(false) // Don't prefetch anymore, pull directly if need be
+	// 合约账户才有 storage . eoa直接返回
 	if len(s.pendingStorage) == 0 {
 		return s.trie
 	}
@@ -377,6 +380,7 @@ func (s *stateObject) updateRoot(db Database) {
 // This updates the trie root.
 func (s *stateObject) CommitTrie(db Database) (int, error) {
 	// If nothing changed, don't bother with hashing anything
+	// eoa账户直接返回 nil
 	if s.updateTrie(db) == nil {
 		return 0, nil
 	}

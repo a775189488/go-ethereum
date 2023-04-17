@@ -84,7 +84,8 @@ var Defaults = Config{
 	TrieTimeout:             60 * time.Minute,
 	SnapshotCache:           102,
 	Miner: miner.Config{
-		GasCeil:  30000000,
+		GasCeil: 30000000,
+		// 默认 GasPrice 为 1Gwei 也就是 10^9wei
 		GasPrice: big.NewInt(params.GWei),
 		Recommit: 3 * time.Second,
 	},

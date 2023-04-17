@@ -634,6 +634,7 @@ func (s *PublicBlockChainAPI) BlockNumber() hexutil.Uint64 {
 // GetBalance returns the amount of wei for the given address in the state of the
 // given block number. The rpc.LatestBlockNumber and rpc.PendingBlockNumber meta
 // block numbers are also allowed.
+// 在ipc调用时，可以不输入 blockNrOrHash的值。这种情况下默认为查询最新的区块
 func (s *PublicBlockChainAPI) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	state, _, err := s.b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 	if state == nil || err != nil {
@@ -1014,6 +1015,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		if block == nil {
 			return 0, errors.New("block not found")
 		}
+		// 如果你在交易时没有设置 Gas 数量，这里直接拉满到 GasLimit
 		hi = block.GasLimit()
 	}
 	// Normalize the max fee per gas the call is willing to spend.
@@ -1041,6 +1043,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 			}
 			available.Sub(available, args.Value.ToInt())
 		}
+		// feeCap 是 GasPrice。所以 allowance 指的是你的余额(扣除了转账之后的)可以支付多少 Gas
 		allowance := new(big.Int).Div(available, feeCap)
 
 		// If the allowance is larger than maximum uint64, skip checking
@@ -1063,6 +1066,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
+		// 这里是假设你消耗的 Gas 是最大值看是否能完成这个transation
 		args.Gas = (*hexutil.Uint64)(&gas)
 
 		result, err := DoCall(ctx, b, args, blockNrOrHash, nil, 0, gasCap)
@@ -1627,6 +1631,7 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 		// Ensure only eip155 signed transactions are submitted if EIP155Required is set.
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
+	// 将交易放到本地池子中，挖矿的时候会从里面获取交易打包
 	if err := b.SendTx(ctx, tx); err != nil {
 		return common.Hash{}, err
 	}
@@ -1637,6 +1642,7 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 		return common.Hash{}, err
 	}
 
+	// 如果收款方不存在是暂时不存在的地址，则创建
 	if tx.To() == nil {
 		addr := crypto.CreateAddress(from, tx.Nonce())
 		log.Info("Submitted contract creation", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "contract", addr.Hex(), "value", tx.Value())

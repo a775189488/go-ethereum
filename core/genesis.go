@@ -97,10 +97,12 @@ func (ga *GenesisAlloc) flush(db ethdb.Database) (common.Hash, error) {
 			statedb.SetState(addr, key, value)
 		}
 	}
+	// 这个 commit 只是写进缓存
 	root, err := statedb.Commit(false)
 	if err != nil {
 		return common.Hash{}, err
 	}
+	// 这里才会落盘
 	err = statedb.Database().TrieDB().Commit(root, true, nil)
 	if err != nil {
 		return common.Hash{}, err
@@ -161,7 +163,7 @@ func CommitGenesisState(db ethdb.Database, hash common.Hash) error {
 type GenesisAccount struct {
 	// 感觉这个是智能合约的代码或者字节码
 	Code []byte `json:"code,omitempty"`
-	//todo 这个和 solidity 的 stroage 的变量有关系吗
+	// 合约中的 storage
 	Storage map[common.Hash]common.Hash `json:"storage,omitempty"`
 	// 存款
 	Balance *big.Int `json:"balance" gencodec:"required"`
@@ -376,7 +378,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) *types.Block {
 		Difficulty: g.Difficulty,
 		MixDigest:  g.Mixhash,
 		Coinbase:   g.Coinbase,
-		// 注意 root 是 alloc 的 hash
+		// 注意 root 是 alloc mtp的根hash值
 		Root: root,
 	}
 	if g.GasLimit == 0 {
@@ -385,6 +387,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) *types.Block {
 	if g.Difficulty == nil && g.Mixhash == (common.Hash{}) {
 		head.Difficulty = params.GenesisDifficulty
 	}
+	// 如果把londonBlock写在genesis.json里面且写了0，那么相当于从创世区块开始就要使用basefee进行eth燃烧
 	if g.Config != nil && g.Config.IsLondon(common.Big0) {
 		if g.BaseFee != nil {
 			head.BaseFee = g.BaseFee

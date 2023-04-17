@@ -72,6 +72,7 @@ func LatestSigner(config *params.ChainConfig) Signer {
 		if config.EIP155Block != nil {
 			return NewEIP155Signer(config.ChainID)
 		}
+		// fixme 这里应该返回 error 的，因为如果我配置了 chainID 但是没有配置这几个 Block 那么返回的是 HomesteadSigner。但是在wallet那边却是 HomesteadSigner
 	}
 	return HomesteadSigner{}
 }
@@ -84,6 +85,7 @@ func LatestSigner(config *params.ChainConfig) Signer {
 // configuration are unknown. If you have a ChainConfig, use LatestSigner instead.
 // If you have a ChainConfig and know the current block number, use MakeSigner instead.
 func LatestSignerForChainID(chainID *big.Int) Signer {
+	// 无语：chainID != nil 就一定是 londonSigner
 	if chainID == nil {
 		return HomesteadSigner{}
 	}

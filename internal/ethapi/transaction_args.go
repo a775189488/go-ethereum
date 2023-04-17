@@ -34,11 +34,16 @@ import (
 // TransactionArgs represents the arguments to construct a new transaction
 // or a message call.
 type TransactionArgs struct {
-	From                 *common.Address `json:"from"`
-	To                   *common.Address `json:"to"`
-	Gas                  *hexutil.Uint64 `json:"gas"`
-	GasPrice             *hexutil.Big    `json:"gasPrice"`
-	MaxFeePerGas         *hexutil.Big    `json:"maxFeePerGas"`
+	// 发送方
+	From *common.Address `json:"from"`
+	// 接收方
+	To  *common.Address `json:"to"`
+	Gas *hexutil.Uint64 `json:"gas"`
+	// 每个Gas的价格
+	GasPrice *hexutil.Big `json:"gasPrice"`
+	// 每个Gas的最高费用(如果是伦敦升级之后，那应该是 MaxPriorityFeePerGas + Basefee)
+	MaxFeePerGas *hexutil.Big `json:"maxFeePerGas"`
+	// 每个Gas支持给矿工的小费
 	MaxPriorityFeePerGas *hexutil.Big    `json:"maxPriorityFeePerGas"`
 	Value                *hexutil.Big    `json:"value"`
 	Nonce                *hexutil.Uint64 `json:"nonce"`
@@ -117,6 +122,7 @@ func (args *TransactionArgs) setDefaults(ctx context.Context, b Backend) error {
 					// upwards.
 					price.Add(price, head.BaseFee)
 				}
+				// 如果没有设置给一个预算出来的
 				args.GasPrice = (*hexutil.Big)(price)
 			}
 		}
@@ -158,6 +164,7 @@ func (args *TransactionArgs) setDefaults(ctx context.Context, b Backend) error {
 			AccessList:           args.AccessList,
 		}
 		pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+		// 默认的 rpcGasCap == 50000000 5*10^7
 		estimated, err := DoEstimateGas(ctx, b, callArgs, pendingBlockNr, b.RPCGasCap())
 		if err != nil {
 			return err
@@ -248,6 +255,7 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int) (t
 func (args *TransactionArgs) toTransaction() *types.Transaction {
 	var data types.TxData
 	switch {
+	// 有 max_fee_per_gas 的已经是 london 升级之后了
 	case args.MaxFeePerGas != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {

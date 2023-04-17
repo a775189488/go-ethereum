@@ -406,6 +406,7 @@ func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error
 		return true, &shortNode{key, value, t.newFlag()}, nil
 
 	case hashNode:
+		// 如果遇到了 hashNode 说明这个节点还没有从磁盘或者db缓存加载出来，需要调用 resolveHash 加载一次
 		// We've hit a part of the trie that isn't loaded yet. Load
 		// the node and insert into it. This leaves all child nodes on
 		// the path to the value in the trie.
@@ -660,6 +661,7 @@ func (t *Trie) Commit(onleaf LeafCallback) (common.Hash, int, error) {
 			h.commitLoop(t.db)
 		}()
 	}
+	// commit 了之后返回的 newRoot 是个 hashNode
 	newRoot, committed, err := h.Commit(t.root, t.db)
 	if onleaf != nil {
 		// The leafch is created in newCommitter if there was an onleaf callback
@@ -672,6 +674,7 @@ func (t *Trie) Commit(onleaf LeafCallback) (common.Hash, int, error) {
 	if err != nil {
 		return common.Hash{}, 0, err
 	}
+	// 那么之后的这个 t.root 也是个hashNode了
 	t.root = newRoot
 	return rootHash, committed, nil
 }

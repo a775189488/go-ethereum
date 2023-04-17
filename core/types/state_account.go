@@ -27,8 +27,12 @@ import (
 // StateAccount is the Ethereum consensus representation of accounts.
 // These objects are stored in the main account trie.
 type StateAccount struct {
-	Nonce    uint64
-	Balance  *big.Int
-	Root     common.Hash // merkle root of the storage trie
+	// 交易序列号，防止双花
+	Nonce   uint64
+	Balance *big.Int
+	// Root 表示当前账户的下 Storage 层的 Merkle Patricia Trie 的 Root。这里的存储层是为了管理合约中持久化变量准备的。
+	// 对于 EOA 账户这个部分为空值
+	Root common.Hash // merkle root of the storage trie
+	// CodeHash 是该账户的 Contract 代码的哈希值。同样的，这个变量是用于保存合约账户中的代码的 hash ，EOA 账户这个部分为空值。
 	CodeHash []byte
 }

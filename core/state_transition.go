@@ -121,6 +121,9 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 	if isContractCreation && isHomestead {
 		gas = params.TxGasContractCreation
 	} else {
+		// 非合约事务至少 21000 的 gas。
+		// GasPrice 如果不设置其实是用的默认的 1 Gwei 也就是 10^9 wei
+		// 那么转账账户至少要有 21000 * 10^9 = 2.1 * 10^13 wei才能进行一次转账
 		gas = params.TxGas
 	}
 	// Bump the required gas by the amount of transactional data
@@ -190,23 +193,30 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas() error {
+	// gas * gasPrice
 	mgval := new(big.Int).SetUint64(st.msg.Gas())
 	mgval = mgval.Mul(mgval, st.gasPrice)
 	balanceCheck := mgval
+	// (gas * gasPrice) + (gas * gasFeeCap) 每个Gas需要支付的小费
 	if st.gasFeeCap != nil {
 		balanceCheck = new(big.Int).SetUint64(st.msg.Gas())
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.gasFeeCap)
 		balanceCheck.Add(balanceCheck, st.value)
 	}
+	// 看下是否够你当前的余额是否足够支付
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
 		return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 	}
+	// 足够了，从GasPool扣除实际消耗的 Gas (为什么要有GasPool？)
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
 		return err
 	}
+	// 添加上当前的 Gas
 	st.gas += st.msg.Gas()
 
+	// 设置初始 Gas
 	st.initialGas = st.msg.Gas()
+	// 扣费
 	st.state.SubBalance(st.msg.From(), mgval)
 	return nil
 }
@@ -330,9 +340,11 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+		// 直接转账 gas 没变化
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value)
 	}
 
+	// refundGas 将多余Gas费用的退款
 	if !rules.IsLondon {
 		// Before EIP-3529: refunds were capped to gasUsed / 2
 		st.refundGas(params.RefundQuotient)
@@ -344,6 +356,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	if rules.IsLondon {
 		effectiveTip = cmath.BigMin(st.gasTipCap, new(big.Int).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
 	}
+	// 给矿工的奖励吗？花了多少gas就给多少奖励？
 	st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 
 	return &ExecutionResult{

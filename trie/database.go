@@ -322,7 +322,7 @@ func (db *Database) insert(hash common.Hash, size int, node node) {
 		size:      uint16(size),
 		flushPrev: db.newest,
 	}
-	// parents 一般是指 fullnode
+	// parents 一般是指 fullnode 因为 fullnode 的child在上层都会替换为hashnode。因为是由底往上commit的，所以这里统计child的parents信息
 	entry.forChilds(func(child common.Hash) {
 		if c := db.dirties[child]; c != nil {
 			c.parents++
@@ -471,6 +471,8 @@ func (db *Database) Nodes() []common.Hash {
 // This function is used to add reference between internal trie node
 // and external node(e.g. storage trie root), all internal trie nodes
 // are referenced together by database itself.
+// 什么是 internal trie?
+// 什么是 external trie?
 func (db *Database) Reference(child common.Hash, parent common.Hash) {
 	db.lock.Lock()
 	defer db.lock.Unlock()
@@ -709,6 +711,7 @@ func (db *Database) Commit(node common.Hash, report bool, callback func(common.H
 		return err
 	}
 	// Trie mostly committed to disk, flush any batch leftovers
+	// write 表示直接将lvldb中的缓存写入磁盘。其实 commit 中到达了一定的 size 也是会执行的
 	if err := batch.Write(); err != nil {
 		log.Error("Failed to write trie to disk", "err", err)
 		return err
@@ -750,6 +753,7 @@ func (db *Database) commit(hash common.Hash, batch ethdb.Batch, uncacher *cleane
 		return nil
 	}
 	var err error
+	// 这里会迭代将所有的子节点都写到lvldb中去
 	node.forChilds(func(child common.Hash) {
 		if err == nil {
 			err = db.commit(child, batch, uncacher, callback)
@@ -759,15 +763,18 @@ func (db *Database) commit(hash common.Hash, batch ethdb.Batch, uncacher *cleane
 		return err
 	}
 	// If we've reached an optimal batch size, commit and start over
+	// 写 level db 这里没有真正写入磁盘，而是写到了 lvldb缓存中
 	rawdb.WriteTrieNode(batch, hash, node.rlp())
 	if callback != nil {
 		callback(hash)
 	}
+	// 到了一定的 batchSize 才会写入磁盘 valueSize = len(key) + len(val)
 	if batch.ValueSize() >= ethdb.IdealBatchSize {
 		if err := batch.Write(); err != nil {
 			return err
 		}
 		db.lock.Lock()
+		// 目的是删除 database 里面已经commit的node信息
 		batch.Replay(uncacher)
 		batch.Reset()
 		db.lock.Unlock()
