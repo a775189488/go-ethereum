@@ -207,7 +207,7 @@ func (st *StateTransition) buyGas() error {
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
 		return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 	}
-	// 足够了，从GasPool扣除实际消耗的 Gas (为什么要有GasPool？)
+	// 足够了，从GasPool扣除实际消耗的 Gas. GasPool应该是为了限制每个区块中的Gas数量（其实也是限制事务数量吧）
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
 		return err
 	}
@@ -368,6 +368,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 
 func (st *StateTransition) refundGas(refundQuotient uint64) {
 	// Apply refund counter, capped to a refund quotient
+	// st.gas 是余额。这里相当是将使用的gas按照一定的比例回退给用户。但是这里不明确的是会退多少 st.state.GetRefund没有明确看，如果是0则就没有返的
 	refund := st.gasUsed() / refundQuotient
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()

@@ -47,16 +47,24 @@ type Tally struct {
 }
 
 // Snapshot is the state of the authorization voting at a given point in time.
+// Snapshot的作用是统计并保存链的某段高度区间的投票信息和签名者列表。
+// 这个统计区间是从某个checkpoint开始（包括genesis block），到某个更高高度的block。
 type Snapshot struct {
 	config   *params.CliqueConfig // Consensus engine parameters to fine tune behavior
 	sigcache *lru.ARCCache        // Cache of recent block signatures to speed up ecrecover
 
-	Number  uint64                      `json:"number"`  // Block number where the snapshot was created
-	Hash    common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
+	// 区块高度
+	Number uint64 `json:"number"` // Block number where the snapshot was created
+	// 区块hash
+	Hash common.Hash `json:"hash"` // Block hash where the snapshot was created
+	// 当时的所有有效signer信息
 	Signers map[common.Address]struct{} `json:"signers"` // Set of authorized signers at this moment
-	Recents map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
-	Votes   []*Vote                     `json:"votes"`   // List of votes cast in chronological order
-	Tally   map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
+	// 最近生成过block的签名者。其中map的key是生成的block的高度
+	Recents map[uint64]common.Address `json:"recents"` // Set of recent signers for spam protections
+	// 投票信息
+	Votes []*Vote `json:"votes"` // List of votes cast in chronological order
+	// 投票信息汇总：key是投票对象，value是票型
+	Tally map[common.Address]Tally `json:"tally"` // Current vote tally to avoid recalculating
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
@@ -206,6 +214,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 	for i, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
+		// 如果当前header所在的是checkpoint的区块，就直接清除掉所有的投票信息.也就是该header之前的投票信息都不算了
 		if number%s.config.Epoch == 0 {
 			snap.Votes = nil
 			snap.Tally = make(map[common.Address]Tally)
@@ -215,6 +224,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			delete(snap.Recents, number-limit)
 		}
 		// Resolve the authorization key and check against signers
+		// 从header中还原该block的出块者信息
 		signer, err := ecrecover(header, s.sigcache)
 		if err != nil {
 			return nil, err
@@ -259,10 +269,13 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			})
 		}
 		// If the vote passed, update the list of signers
+		// 票数过半提案就会生效
 		if tally := snap.Tally[header.Coinbase]; tally.Votes > len(snap.Signers)/2 {
 			if tally.Authorize {
+				// 准入提案就直接将对应的地址加入signers即可
 				snap.Signers[header.Coinbase] = struct{}{}
 			} else {
+				// 踢出提案先将对应地址从signers删除
 				delete(snap.Signers, header.Coinbase)
 
 				// Signer list shrunk, delete any leftover recent caches
@@ -270,6 +283,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 					delete(snap.Recents, number-limit)
 				}
 				// Discard any previous votes the deauthorized signer cast
+				// 将踢出者投的票都作废了
 				for i := 0; i < len(snap.Votes); i++ {
 					if snap.Votes[i].Signer == header.Coinbase {
 						// Uncast the vote from the cached tally
@@ -283,12 +297,14 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 				}
 			}
 			// Discard any previous votes around the just changed account
+			// 提案已经完成了，删除针对该后选择的投票
 			for i := 0; i < len(snap.Votes); i++ {
 				if snap.Votes[i].Address == header.Coinbase {
 					snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
 					i--
 				}
 			}
+			// 提案已经执行完成，删除针对该候选者的投票记录
 			delete(snap.Tally, header.Coinbase)
 		}
 		// If we're taking too much time (ecrecover), notify the user once a while
@@ -301,6 +317,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		log.Info("Reconstructed voting history", "processed", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 	}
 	snap.Number += uint64(len(headers))
+	// 更新该snap的hash值
 	snap.Hash = headers[len(headers)-1].Hash()
 
 	return snap, nil
@@ -319,8 +336,10 @@ func (s *Snapshot) signers() []common.Address {
 // inturn returns if a signer at a given block height is in-turn or not.
 func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
 	signers, offset := s.signers(), 0
+	// 计算当前的signer在所有的signer中排第几（按照地址的字节序排列）
 	for offset < len(signers) && signers[offset] != signer {
 		offset++
 	}
+	// 使用当前的区块高度对signers数量取余，再和rank比较
 	return (number % uint64(len(signers))) == uint64(offset)
 }

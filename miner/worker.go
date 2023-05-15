@@ -1068,6 +1068,7 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
 			localTxs[account] = txs
 		}
 	}
+	// 先处理local的，这里的local应该是发送到当前节点的事务
 	if len(localTxs) > 0 {
 		txs := types.NewTransactionsByPriceAndNonce(env.signer, localTxs, env.header.BaseFee)
 		if err := w.commitTransactions(env, txs, interrupt); err != nil {

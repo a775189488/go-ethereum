@@ -1079,6 +1079,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 		return result.Failed(), result, nil
 	}
 	// Execute the binary search and hone in on an executable gas limit
+	// 使用二分法找出合适的 gasLimit
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
 		failed, _, err := executable(mid)

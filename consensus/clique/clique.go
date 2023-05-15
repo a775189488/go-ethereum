@@ -176,6 +176,7 @@ type Clique struct {
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 
+	// 当前节点产生的提案。需要主动调用api才会生成 address -> 准入/提出
 	proposals map[common.Address]bool // Current list of proposals we are pushing
 
 	signer common.Address // Ethereum address of the signing key
@@ -390,11 +391,14 @@ func (c *Clique) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// at a checkpoint block without a parent (light client CHT), or we have piled
 		// up more headers than allowed to be reorged (chain reinit from a freezer),
 		// consider the checkpoint trusted and snapshot it.
+		// 1. 这个区块是上帝区块
+		// 2. 如果该区块是checkpoint区块（暂时不分析）
 		if number == 0 || (number%c.config.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil)) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
 				hash := checkpoint.Hash()
 
+				// 取 extradata 中定义的 address 作为第一批 signer
 				signers := make([]common.Address, (len(checkpoint.Extra)-extraVanity-extraSeal)/common.AddressLength)
 				for i := 0; i < len(signers); i++ {
 					copy(signers[i][:], checkpoint.Extra[extraVanity+i*common.AddressLength:])
@@ -507,9 +511,12 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	if err != nil {
 		return err
 	}
+
+	// 只要不是checkpoint区块都会进行投票
 	if number%c.config.Epoch != 0 {
 		c.lock.RLock()
 
+		// 遍历有效的提案。什么是有效？比如某准入提案的目标地址已经在之前准入了，就不是有效提案
 		// Gather all the proposals that make sense voting on
 		addresses := make([]common.Address, 0, len(c.proposals))
 		for address, authorize := range c.proposals {
@@ -519,7 +526,9 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		}
 		// If there's pending proposals, cast a vote on them
 		if len(addresses) > 0 {
+			// 在clique中coinbase存的是提案的目标地址
 			header.Coinbase = addresses[rand.Intn(len(addresses))]
+			// 在clique中Nonce表示当前提案是准入还是踢出票
 			if c.proposals[header.Coinbase] {
 				copy(header.Nonce[:], nonceAuthVote)
 			} else {
@@ -528,7 +537,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		}
 		c.lock.RUnlock()
 	}
-	// Set the correct difficulty
+	// Set the correct difficulty 计算当前signer是intern还是notern
 	header.Difficulty = calcDifficulty(snap, c.signer)
 
 	// Ensure the extra data has all its components
@@ -537,6 +546,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	}
 	header.Extra = header.Extra[:extraVanity]
 
+	// 如果当前是checkpoint的块，则会在extra中添加所有signer的信息
 	if number%c.config.Epoch == 0 {
 		for _, signer := range snap.signers() {
 			header.Extra = append(header.Extra, signer[:]...)
@@ -552,6 +562,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
+	// 添加出块时间
 	header.Time = parent.Time + c.config.Period
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
@@ -625,6 +636,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
+	// 如果之前计算出来当前的signer的状态是noturn那么就需要等一段时间才能打包区块
 	if header.Difficulty.Cmp(diffNoTurn) == 0 {
 		// It's not our turn explicitly to sign, delay it a bit
 		wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
@@ -641,6 +653,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// Wait until sealing is terminated or delay timeout.
 	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
+		// 如果是intern则立即会进行打包
 		select {
 		case <-stop:
 			return

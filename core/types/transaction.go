@@ -518,6 +518,7 @@ func NewTransactionsByPriceAndNonce(signer Signer, txs map[common.Address]Transa
 		heads = append(heads, wrapped)
 		txs[from] = accTxs[1:]
 	}
+	// 使用大顶堆构建事务。优先处理那些minerFee高的事务
 	heap.Init(&heads)
 
 	// Assemble and return the transaction set
