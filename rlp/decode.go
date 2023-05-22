@@ -561,14 +561,16 @@ type ByteReader interface {
 type Stream struct {
 	r ByteReader
 
-	remaining uint64   // number of bytes remaining to be read from r
-	size      uint64   // size of value ahead
-	kinderr   error    // error from last readKind
-	stack     []uint64 // list sizes
-	uintbuf   [32]byte // auxiliary buffer for integer decoding
-	kind      Kind     // kind of value ahead
-	byteval   byte     // value of single byte in type tag
-	limited   bool     // true if input limit is in effect
+	remaining uint64 // number of bytes remaining to be read from r
+	// 数据大小，不包含head的信息
+	size    uint64 // size of value ahead
+	kinderr error  // error from last readKind
+	// 数组嵌套的场景下，使用栈的方式一层层存储每个list的大小
+	stack   []uint64 // list sizes
+	uintbuf [32]byte // auxiliary buffer for integer decoding
+	kind    Kind     // kind of value ahead
+	byteval byte     // value of single byte in type tag
+	limited bool     // true if input limit is in effect
 }
 
 // NewStream creates a new decoding stream reading from r.

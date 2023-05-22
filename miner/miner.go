@@ -104,6 +104,7 @@ func (miner *Miner) update() {
 	dlEventCh := events.Chan()
 	for {
 		select {
+		// 在同步区块的时候暂停挖矿，同步完成之后恢复状态
 		case ev := <-dlEventCh:
 			if ev == nil {
 				// Unsubscription done, stop listening

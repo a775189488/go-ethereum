@@ -121,6 +121,7 @@ func decodeNode(hash, buf []byte) (node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode error: %v", err)
 	}
+	// shortnode 有2个成员变量 fullnode 有17个 （数组拆开算，flags字段不会持久化所以不算在内）
 	switch c, _ := rlp.CountValues(elems); c {
 	case 2:
 		n, err := decodeShort(hash, elems)
@@ -141,6 +142,8 @@ func decodeShort(hash, elems []byte) (node, error) {
 	flag := nodeFlag{hash: hash}
 	key := compactToHex(kbuf)
 	if hasTerm(key) {
+		// hasTerm 主要检测该shortnode对应的是否是valuenode
+		// 如果是valuenode则key的最后一个字节一定是16[表示终止符]
 		// value node
 		val, _, err := rlp.SplitString(rest)
 		if err != nil {

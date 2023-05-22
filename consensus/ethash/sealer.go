@@ -132,8 +132,10 @@ func (ethash *Ethash) Seal(chain consensus.ChainHeaderReader, block *types.Block
 func (ethash *Ethash) mine(block *types.Block, id int, seed uint64, abort chan struct{}, found chan *types.Block) {
 	// Extract some data from the header
 	var (
-		header  = block.Header()
-		hash    = ethash.SealHash(header).Bytes()
+		header = block.Header()
+		hash   = ethash.SealHash(header).Bytes()
+		// target = 2^256 / difficulty header+nonce 计算出来的hash值当作一个整数，必须小于target才算一个有效区块
+		// difficulty 越大target越小。那么出块通过概率就越低
 		target  = new(big.Int).Div(two256, header.Difficulty)
 		number  = header.Number.Uint64()
 		dataset = ethash.dataset(number, false)
@@ -164,6 +166,9 @@ search:
 			}
 			// Compute the PoW value of this nonce
 			digest, result := hashimotoFull(dataset.dataset, hash, nonce)
+			// result 类似余 bitcoin 计算前导零。是pow的直接产物
+			// digest 根据 dag 计算出来的值, 校验时会根据block算一次再和 header.MixDigest 比较看是否相同。主要是确定该block的pow时使
+			// 用dag计算出来的（抗asic矿机）
 			if powBuffer.SetBytes(result).Cmp(target) <= 0 {
 				// Correct nonce found, create a new header with it
 				header = types.CopyHeader(header)

@@ -94,6 +94,7 @@ func compactToHex(compact []byte) []byte {
 	return base[chop:]
 }
 
+// 一个byte分为2个byte存储（前4位后4位）目的是减少trie的分叉（如果不分开存储那么将会有256个分叉）
 func keybytesToHex(str []byte) []byte {
 	l := len(str)*2 + 1
 	var nibbles = make([]byte, l)
@@ -101,6 +102,7 @@ func keybytesToHex(str []byte) []byte {
 		nibbles[i*2] = b / 16
 		nibbles[i*2+1] = b % 16
 	}
+	// 往最后一个byte写入16
 	nibbles[l-1] = 16
 	return nibbles
 }

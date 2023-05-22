@@ -345,6 +345,7 @@ func (d *dataset) generate(dir string, limit int, lock bool, test bool) {
 		runtime.SetFinalizer(d, (*dataset).finalizer)
 
 		// Try to load the file from disk and memory map it
+		// 先从文件中读，读不到再再内存中生成
 		var err error
 		d.dump, d.mmap, d.dataset, err = memoryMap(path, lock)
 		if err == nil {

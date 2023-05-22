@@ -92,6 +92,7 @@ func (p *Peer) broadcastTransactions() {
 			if len(txs) > 0 {
 				done = make(chan struct{})
 				go func() {
+					// 实际上就是调用普通的发送transaction函数
 					if err := p.SendTransactions(txs); err != nil {
 						fail <- err
 						return

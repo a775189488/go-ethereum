@@ -24,10 +24,14 @@ import (
 )
 
 type encBuffer struct {
-	str     []byte     // string data, contains everything except list headers
-	lheads  []listhead // all list headers
-	lhsize  int        // sum of sizes of all encoded list headers
-	sizebuf [9]byte    // auxiliary buffer for uint encoding
+	// 存除了header之外的数据
+	str []byte // string data, contains everything except list headers
+	// list的元信息，表示了list的大小和开始下标
+	lheads []listhead // all list headers
+	// 所有list元信息的总大小
+	lhsize int // sum of sizes of all encoded list headers
+	// 输出的时候用于做临时数据存放
+	sizebuf [9]byte // auxiliary buffer for uint encoding
 }
 
 // The global encBuffer pool.
@@ -134,6 +138,7 @@ func (buf *encBuffer) writeBytes(b []byte) {
 		buf.str = append(buf.str, b[0])
 	} else {
 		buf.encodeStringHeader(len(b))
+		// 上一步会把header存放到 buf.str 中，再append到对应的结果内
 		buf.str = append(buf.str, b...)
 	}
 }
@@ -195,14 +200,17 @@ func (buf *encBuffer) encode(val interface{}) error {
 	return writer(rval, buf)
 }
 
+// 0x80 + 55 = 0xB7
+// 0xB7
 func (buf *encBuffer) encodeStringHeader(size int) {
 	if size < 56 {
 		buf.str = append(buf.str, 0x80+byte(size))
 	} else {
-		// 计算 BE(||x||)
+		// 计算 BE(||x||) [存放字符串的长度]
 		sizesize := putint(buf.sizebuf[1:], uint64(size))
-		// 计算 183 + ||BE(||x||)||
+		// 计算 183 + ||BE(||x||)|| [存放(字符串长度)的长度]
 		buf.sizebuf[0] = 0xB7 + byte(sizesize)
+		// 将实际的字符串内容存放到 buf.str 中在外层直接使用
 		buf.str = append(buf.str, buf.sizebuf[:sizesize+1]...)
 	}
 }

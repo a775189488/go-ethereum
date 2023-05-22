@@ -117,6 +117,9 @@ func CountValues(b []byte) (int, error) {
 	return i, nil
 }
 
+// k: 数据类型
+// tagsize: tag的大小 [tag的作用有很多，比如string的tag是用余存放string【长度的长度】的大小的]
+// contentsize: 数据长度的大小
 func readKind(buf []byte) (k Kind, tagsize, contentsize uint64, err error) {
 	if len(buf) == 0 {
 		return 0, 0, 0, io.ErrUnexpectedEOF
@@ -124,6 +127,7 @@ func readKind(buf []byte) (k Kind, tagsize, contentsize uint64, err error) {
 	b := buf[0]
 	switch {
 	case b < 0x80:
+		// 小于 0x80(128) 的可能是 int, string 都当作 byte 处理
 		k = Byte
 		tagsize = 0
 		contentsize = 1

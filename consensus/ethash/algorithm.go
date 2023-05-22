@@ -136,6 +136,7 @@ func seedHash(block uint64) []byte {
 // algorithm from Strict Memory Hard Hashing Functions (2014). The output is a
 // set of 524288 64-byte values.
 // This method places the result into dest in machine byte order.
+// seed 一般是区块高度
 func generateCache(dest []uint32, epoch uint64, seed []byte) {
 	// Print some debug logs to allow analysis on low end devices
 	logger := log.New("epoch", epoch)
@@ -151,6 +152,10 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 		logFn("Generated ethash verification cache", "elapsed", common.PrettyDuration(elapsed))
 	}()
 	// Convert our destination slice to a byte buffer
+	// 下面这段代码其实很别扭。首先 dest 的类型为 []uint32 而 cache 的类型为 []byte
+	// 已经知道 1 uint32 = 4 byte
+	// 因此需要将 Len 和 Cap 乘 4
+	// 但是为什么不直接使用  var cache = make([]byte, len(dest*4)) 呢？
 	var cache []byte
 	cacheHdr := (*reflect.SliceHeader)(unsafe.Pointer(&cache))
 	dstHdr := (*reflect.SliceHeader)(unsafe.Pointer(&dest))
@@ -160,6 +165,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 
 	// Calculate the number of theoretical rows (we'll store in one buffer nonetheless)
 	size := uint64(len(cache))
+	// 64字节一个单位(下文的item)
 	rows := int(size) / hashBytes
 
 	// Start a monitoring goroutine to report progress on low end devices
@@ -182,7 +188,9 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 	keccak512 := makeHasher(sha3.NewLegacyKeccak512())
 
 	// Sequentially produce the initial dataset
+	// 先将seed的hash值设置到cache的第一个位置中（这里需要注意的是每个位置的大小为 hashBytes）
 	keccak512(cache, seed)
+	// 将第一个位置的数据作为基础。后一个位置作为前一个位置的 hash 值
 	for offset := uint64(hashBytes); offset < size; offset += hashBytes {
 		keccak512(cache[offset:], cache[offset-hashBytes:offset])
 		atomic.AddUint32(&progress, 1)
@@ -190,8 +198,12 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 	// Use a low-round version of randmemohash
 	temp := make([]byte, hashBytes)
 
+	// 需要重复做三次。目的是加强data的随机化
 	for i := 0; i < cacheRounds; i++ {
 		for j := 0; j < rows; j++ {
+			// srcOff 是从尾部向头部变化的，而dstOff是从头部向尾部变化的。并且它俩是对应的，即当srcOff代表倒数第x个item时，dstOff则代表正数第x个item
+			// xorOff 是将 dstOff 作为一个 uint32 再对 rows 取余。结果作为cache的一个item的index
+			// 这里的操作其实是从头到位对每一个 srcOff item 在 cache 随机取一个另外的 item 跟它做异或操作
 			var (
 				srcOff = ((j - 1 + rows) % rows) * hashBytes
 				dstOff = j * hashBytes
@@ -235,18 +247,22 @@ func fnvHash(mix []uint32, data []uint32) {
 // and hashes that to compute a single dataset node.
 func generateDatasetItem(cache []uint32, index uint32, keccak512 hasher) []byte {
 	// Calculate the number of theoretical rows (we use one buffer nonetheless)
+	// hashBytes = 64 cache 为 []uint32 每个元素占4字节。 16个uint32组成一个hashBytes
 	rows := uint32(len(cache) / hashWords)
 
 	// Initialize the mix
 	mix := make([]byte, hashBytes)
 
+	// 这里只初始化了初始4字节
 	binary.LittleEndian.PutUint32(mix, cache[(index%rows)*hashWords]^index)
+	// 这里接着初始化剩下的60字节
 	for i := 1; i < hashWords; i++ {
 		binary.LittleEndian.PutUint32(mix[i*4:], cache[(index%rows)*hashWords+uint32(i)])
 	}
 	keccak512(mix, mix)
 
 	// Convert the mix to uint32s to avoid constant bit shifting
+	// 这里只是将 mix 从 []byte 转乘 []uint32
 	intMix := make([]uint32, hashWords)
 	for i := 0; i < len(intMix); i++ {
 		intMix[i] = binary.LittleEndian.Uint32(mix[i*4:])
@@ -308,6 +324,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 			keccak512 := makeHasher(sha3.NewLegacyKeccak512())
 
 			// Calculate the data segment this thread should generate
+			// 利用多核心并行计算dataset。这里是计算每个goroutine需要处理的cache部分
 			batch := (size + hashBytes*uint64(threads) - 1) / (hashBytes * uint64(threads))
 			first := uint64(id) * batch
 			limit := first + batch
@@ -337,6 +354,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 // value for a particular header hash and nonce.
 func hashimoto(hash []byte, nonce uint64, size uint64, lookup func(index uint32) []uint32) ([]byte, []byte) {
 	// Calculate the number of theoretical rows (we use one buffer nonetheless)
+	// size 为 dataset 的大小[byte为单位]
 	rows := uint32(size / mixBytes)
 
 	// Combine header+nonce into a 64 byte seed

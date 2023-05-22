@@ -561,6 +561,7 @@ func (h *handler) Stop() {
 func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 	// Disable the block propagation if the chain has already entered the PoS
 	// stage. The block propagation is delegated to the consensus layer.
+	// POS之后就不允许广播区块了
 	if h.merger.PoSFinalized() {
 		return
 	}
@@ -628,11 +629,13 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 			annos[peer] = append(annos[peer], tx.Hash())
 		}
 	}
+	// 发送transaction的全部信息
 	for peer, hashes := range txset {
 		directPeers++
 		directCount += len(hashes)
 		peer.AsyncSendTransactions(hashes)
 	}
+	// 只发送transaction的hash信息
 	for peer, hashes := range annos {
 		annoPeers++
 		annoCount += len(hashes)

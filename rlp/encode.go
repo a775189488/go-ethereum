@@ -104,6 +104,10 @@ type listhead struct {
 
 // encode writes head to the given buffer, which must be at least
 // 9 bytes long. It returns the encoded bytes.
+// 如果 list 的 listsize < 56 则tag = 0xC0+listsize [ listsize是指该list中所有元素占用的空间大小，而不是list中元素的数量 ]
+// 如果 list 的 listsize >= 56 则tag = 0xF7+len(listsize)
+// 0xC0 + 55 = 0xF7 (55为10进制)
+// 0xF7 + 8 = 0xFF (8为10进制) listsize 最多占8字节(也就是一个uint64) 0xFF刚好是一个 byte 的最大
 func (head *listhead) encode(buf []byte) []byte {
 	return buf[:puthead(buf, 0xC0, 0xF7, uint64(head.size))]
 }

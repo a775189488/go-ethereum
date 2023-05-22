@@ -64,12 +64,16 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 		baseFeeChangeDenominator = new(big.Int).SetUint64(params.BaseFeeChangeDenominator)
 	)
 	// If the parent gasUsed is the same as the target, the baseFee remains unchanged.
+	// 如果父区块的 gasUsed == gasLimit/2 那么 basefee 保持不变
 	if parent.GasUsed == parentGasTarget {
 		return new(big.Int).Set(parent.BaseFee)
 	}
 	if parent.GasUsed > parentGasTarget {
 		// If the parent block used more gas than its target, the baseFee should increase.
+		// 如果大于, 则需要增加区块的 BaseFee
 		gasUsedDelta := new(big.Int).SetUint64(parent.GasUsed - parentGasTarget)
+		// a = ((baseFee * (gasUsed - (gasLimted / 2))) / (gasLimted / 2))) / 8
+		// nextBaseFee = baseFee + max(1, a)
 		x := new(big.Int).Mul(parent.BaseFee, gasUsedDelta)
 		y := x.Div(x, parentGasTargetBig)
 		baseFeeDelta := math.BigMax(
@@ -80,7 +84,10 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 		return x.Add(parent.BaseFee, baseFeeDelta)
 	} else {
 		// Otherwise if the parent block used less gas than its target, the baseFee should decrease.
+		// 如果小雨, 则需要减少 BaseFee
 		gasUsedDelta := new(big.Int).SetUint64(parentGasTarget - parent.GasUsed)
+		// a = ((baseFee * ((gasLimted / 2) - gasUsed)) / (gasLimted / 2))) / 8
+		// nextBaseFee = max(0, BaseFee - a)
 		x := new(big.Int).Mul(parent.BaseFee, gasUsedDelta)
 		y := x.Div(x, parentGasTargetBig)
 		baseFeeDelta := x.Div(y, baseFeeChangeDenominator)

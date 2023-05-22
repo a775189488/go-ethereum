@@ -233,6 +233,9 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int) (t
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
 			gasPrice = new(big.Int)
 			if gasFeeCap.BitLen() > 0 || gasTipCap.BitLen() > 0 {
+				// baseFee 是以太坊用于通缩模型所定义的费用（初始是10^9会随着全网tps调整）
+				// 如果 basefee == 0 相当于用户只需要出自己那份小费。否则就需要承担以太坊通缩的费用. basefee越高，用户需要给的小费就越高
+				// gasPrice = min(feecap, tipcap+basefee)
 				gasPrice = math.BigMin(new(big.Int).Add(gasTipCap, baseFee), gasFeeCap)
 			}
 		}

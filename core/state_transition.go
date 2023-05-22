@@ -197,8 +197,8 @@ func (st *StateTransition) buyGas() error {
 	mgval := new(big.Int).SetUint64(st.msg.Gas())
 	mgval = mgval.Mul(mgval, st.gasPrice)
 	balanceCheck := mgval
-	// (gas * gasPrice) + (gas * gasFeeCap) 每个Gas需要支付的小费
 	if st.gasFeeCap != nil {
+		// 所以这里为什么要单独检查一下 gasFeecap 对应的花费呢？
 		balanceCheck = new(big.Int).SetUint64(st.msg.Gas())
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.gasFeeCap)
 		balanceCheck.Add(balanceCheck, st.value)
@@ -216,7 +216,7 @@ func (st *StateTransition) buyGas() error {
 
 	// 设置初始 Gas
 	st.initialGas = st.msg.Gas()
-	// 扣费
+	// 扣费（需要注意的是，这里的 mgval 如果设置了 gasFee, gasTip 的情况下是会包含在 gasPrice 的）
 	st.state.SubBalance(st.msg.From(), mgval)
 	return nil
 }
@@ -254,12 +254,14 @@ func (st *StateTransition) preCheck() error {
 				return fmt.Errorf("%w: address %v, maxPriorityFeePerGas bit length: %d", ErrTipVeryHigh,
 					st.msg.From().Hex(), l)
 			}
+			// feecap 一定要大于 tipcap (因为 feecap 其实对应的是 maxfeecap)
 			if st.gasFeeCap.Cmp(st.gasTipCap) < 0 {
 				return fmt.Errorf("%w: address %v, maxPriorityFeePerGas: %s, maxFeePerGas: %s", ErrTipAboveFeeCap,
 					st.msg.From().Hex(), st.gasTipCap, st.gasFeeCap)
 			}
 			// This will panic if baseFee is nil, but basefee presence is verified
 			// as part of header validation.
+			// feecap 一定要大雨 basefee (否则后续计算的时候就为0或者负数了)
 			if st.gasFeeCap.Cmp(st.evm.Context.BaseFee) < 0 {
 				return fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s", ErrFeeCapTooLow,
 					st.msg.From().Hex(), st.gasFeeCap, st.evm.Context.BaseFee)
@@ -354,9 +356,10 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
+		// 也就是 BaseFee 越高，证明当前网络的交易比较繁忙，矿工的收益越低
 		effectiveTip = cmath.BigMin(st.gasTipCap, new(big.Int).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
 	}
-	// 给矿工的奖励吗？花了多少gas就给多少奖励？
+	// 当前使用的Gas按照一定的比例给矿工。 london升级之前，能得到全额的 gasPrice 对应的 gasUsed 奖励
 	st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 
 	return &ExecutionResult{
